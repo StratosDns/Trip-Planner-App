@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{{ session.get('user_name') }}'s Dashboard</h2>
+
+<section class="grid-two">
+  <article class="card">
+    <h3>Create a New Trip</h3>
+    <form method="post" action="{{ url_for('create_trip') }}" class="form-grid">
+      <label>Trip title <input type="text" name="title" required /></label>
+      <label>Destination <input type="text" name="destination" required /></label>
+      <label>Start date (dd/mm/yyyy) <input type="text" name="start_date" placeholder="dd/mm/yyyy" /></label>
+      <label>End date (dd/mm/yyyy) <input type="text" name="end_date" placeholder="dd/mm/yyyy" /></label>
+      <button type="submit">Create trip</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h3>Your Trips</h3>
+    {% if trips %}
+      <ul>
+        {% for trip in trips %}
+          <li>
+            <a href="{{ url_for('trip_details', trip_id=trip['id']) }}">{{ trip['title'] }}</a>
+            — {{ trip['destination'] }}
+            <span class="muted">({{ trip['start_date_display'] }} to {{ trip['end_date_display'] }})</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No trips yet.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section id="notifications" class="card">
+  <h3>Notifications</h3>
+  {% if notifications %}
+    <ul>
+      {% for notification in notifications %}
+        <li class="notification-row">
+          <div>
+            <strong>{{ notification['trip_title'] }}</strong> — {{ notification['message'] }}
+            <span class="muted">[{{ notification['status'] }}]</span>
+          </div>
+          {% if notification['status'] == 'pending' %}
+            <div class="actions-inline">
+              <form method="post" action="{{ url_for('respond_notification', notification_id=notification['id'], action='accept') }}">
+                <button type="submit">Accept</button>
+              </form>
+              <form method="post" action="{{ url_for('respond_notification', notification_id=notification['id'], action='deny') }}">
+                <button type="submit" class="button secondary">Deny</button>
+              </form>
+            </div>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No notifications yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>Your Bookings by Sector</h3>
+  {% for sector in sectors %}
+    <h4>{{ sector|capitalize }}</h4>
+    {% set items = by_sector.get(sector, []) %}
+    {% if items %}
+      <ul>
+        {% for booking in items %}
+          <li>
+            <strong>{{ booking['title'] }}</strong> ({{ booking['trip_title'] }})
+            {% if booking['provider'] %} — {{ booking['provider'] }}{% endif %}
+            <div class="muted">{{ booking['start_date_display'] }} to {{ booking['end_date_display'] }}</div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No {{ sector }} bookings.</p>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endblock %}
