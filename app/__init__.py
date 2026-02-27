@@ -1,4 +1,5 @@
 from collections import defaultdict
+import os
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 
@@ -11,7 +12,7 @@ SECTORS = ["stay", "flight", "attraction"]
 
 def create_app():
     app = Flask(__name__)
-    app.config["SECRET_KEY"] = "dev-change-me"
+    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-change-me")
 
     init_db()
     app.teardown_appcontext(close_db)
@@ -31,13 +32,13 @@ def create_app():
                 return redirect(url_for("register"))
 
             db = get_db()
-            exists = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+            exists = db.execute("SELECT id FROM users WHERE email = %s", (email,)).fetchone()
             if exists:
                 flash("User with this email already exists.", "danger")
                 return redirect(url_for("register"))
 
             db.execute(
-                "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+                "INSERT INTO users (name, email, password_hash) VALUES (%s, %s, %s)",
                 (name, email, generate_password_hash(password)),
             )
             db.commit()
@@ -53,7 +54,7 @@ def create_app():
             password = request.form.get("password", "")
 
             db = get_db()
-            user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            user = db.execute("SELECT * FROM users WHERE email = %s", (email,)).fetchone()
             if user is None or not check_password_hash(user["password_hash"], password):
                 flash("Invalid email or password.", "danger")
                 return redirect(url_for("login"))
@@ -82,7 +83,7 @@ def create_app():
             SELECT t.*
             FROM trips t
             INNER JOIN trip_members tm ON tm.trip_id = t.id
-            WHERE tm.user_id = ?
+            WHERE tm.user_id = %s
             ORDER BY t.start_date IS NULL, t.start_date, t.created_at DESC
             """,
             (user_id,),
@@ -94,7 +95,7 @@ def create_app():
             FROM bookings b
             INNER JOIN trips t ON t.id = b.trip_id
             INNER JOIN trip_members tm ON tm.trip_id = t.id
-            WHERE tm.user_id = ?
+            WHERE tm.user_id = %s
             ORDER BY b.created_at DESC
             """,
             (user_id,),
@@ -122,13 +123,14 @@ def create_app():
         cur = db.execute(
             """
             INSERT INTO trips (title, destination, start_date, end_date, created_by)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (title, destination, start_date or None, end_date or None, session["user_id"]),
         )
-        trip_id = cur.lastrowid
+        trip_id = cur.fetchone()["id"]
         db.execute(
-            "INSERT INTO trip_members (trip_id, user_id, role) VALUES (?, ?, 'owner')",
+            "INSERT INTO trip_members (trip_id, user_id, role) VALUES (%s, %s, 'owner')",
             (trip_id, session["user_id"]),
         )
         db.commit()
@@ -138,7 +140,7 @@ def create_app():
     def ensure_member(trip_id, user_id):
         db = get_db()
         member = db.execute(
-            "SELECT 1 FROM trip_members WHERE trip_id = ? AND user_id = ?",
+            "SELECT 1 FROM trip_members WHERE trip_id = %s AND user_id = %s",
             (trip_id, user_id),
         ).fetchone()
         return member is not None
@@ -151,19 +153,19 @@ def create_app():
             return redirect(url_for("dashboard"))
 
         db = get_db()
-        trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        trip = db.execute("SELECT * FROM trips WHERE id = %s", (trip_id,)).fetchone()
         members = db.execute(
             """
             SELECT u.name, u.email, tm.role
             FROM trip_members tm
             INNER JOIN users u ON u.id = tm.user_id
-            WHERE tm.trip_id = ?
+            WHERE tm.trip_id = %s
             ORDER BY tm.role DESC, u.name
             """,
             (trip_id,),
         ).fetchall()
         bookings = db.execute(
-            "SELECT * FROM bookings WHERE trip_id = ? ORDER BY booking_date IS NULL, booking_date, created_at DESC",
+            "SELECT * FROM bookings WHERE trip_id = %s ORDER BY booking_date IS NULL, booking_date, created_at DESC",
             (trip_id,),
         ).fetchall()
 
@@ -178,17 +180,21 @@ def create_app():
 
         email = request.form.get("email", "").strip().lower()
         db = get_db()
-        user = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+        user = db.execute("SELECT id FROM users WHERE email = %s", (email,)).fetchone()
         if not user:
             flash("User not found. Ask them to register first.", "danger")
             return redirect(url_for("trip_details", trip_id=trip_id))
 
         db.execute(
-            "INSERT OR IGNORE INTO trip_members (trip_id, user_id, role) VALUES (?, ?, 'member')",
+            """
+            INSERT INTO trip_members (trip_id, user_id, role)
+            VALUES (%s, %s, 'member')
+            ON CONFLICT (trip_id, user_id) DO NOTHING
+            """,
             (trip_id, user["id"]),
         )
         db.commit()
-        flash("Invitation added.", "success")
+        flash("Invitation processed.", "success")
         return redirect(url_for("trip_details", trip_id=trip_id))
 
     @app.route("/trips/<int:trip_id>/bookings", methods=["POST"])
@@ -213,7 +219,7 @@ def create_app():
         db.execute(
             """
             INSERT INTO bookings (trip_id, sector, title, provider, confirmation_code, booking_date, notes, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (trip_id, sector, title, provider or None, confirmation_code or None, booking_date or None, notes or None, session["user_id"]),
         )

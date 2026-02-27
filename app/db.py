@@ -1,14 +1,22 @@
-import sqlite3
-from pathlib import Path
+import os
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from flask import g
 
-DATABASE = Path(__file__).resolve().parent.parent / "trip_planner.db"
+
+def get_database_url():
+    database_url = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError(
+            "Missing database URL. Set SUPABASE_DB_URL (preferred) or DATABASE_URL."
+        )
+    return database_url
 
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
+        g.db = psycopg2.connect(get_database_url(), cursor_factory=RealDictCursor)
     return g.db
 
 
@@ -19,54 +27,58 @@ def close_db(_=None):
 
 
 def init_db():
-    db = sqlite3.connect(DATABASE)
-    cursor = db.cursor()
-    cursor.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS trips (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            destination TEXT NOT NULL,
-            start_date TEXT,
-            end_date TEXT,
-            created_by INTEGER NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(created_by) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS trip_members (
-            trip_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            role TEXT DEFAULT 'member',
-            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (trip_id, user_id),
-            FOREIGN KEY(trip_id) REFERENCES trips(id),
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS bookings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trip_id INTEGER NOT NULL,
-            sector TEXT NOT NULL,
-            title TEXT NOT NULL,
-            provider TEXT,
-            confirmation_code TEXT,
-            booking_date TEXT,
-            notes TEXT,
-            created_by INTEGER NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(trip_id) REFERENCES trips(id),
-            FOREIGN KEY(created_by) REFERENCES users(id)
-        );
-        """
-    )
-    db.commit()
+    db = psycopg2.connect(get_database_url(), cursor_factory=RealDictCursor)
+    with db:
+        with db.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id BIGSERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS trips (
+                    id BIGSERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    destination TEXT NOT NULL,
+                    start_date DATE,
+                    end_date DATE,
+                    created_by BIGINT NOT NULL REFERENCES users(id),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS trip_members (
+                    trip_id BIGINT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role TEXT DEFAULT 'member',
+                    added_at TIMESTAMPTZ DEFAULT NOW(),
+                    PRIMARY KEY (trip_id, user_id)
+                );
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bookings (
+                    id BIGSERIAL PRIMARY KEY,
+                    trip_id BIGINT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+                    sector TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    provider TEXT,
+                    confirmation_code TEXT,
+                    booking_date DATE,
+                    notes TEXT,
+                    created_by BIGINT NOT NULL REFERENCES users(id),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                """
+            )
     db.close()
