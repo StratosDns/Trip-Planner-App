@@ -63,11 +63,20 @@ python run.py
 
 Open `http://127.0.0.1:5000`.
 
+## Existing database? Run ALTER migration (recommended)
+
+Because your tables already exist, run this migration script instead of re-running full create scripts:
+
+- `supabase/migrations/0001_upgrade_existing_schema.sql`
+
+This script alters existing tables to the latest app expectations (notifications/pending_invites, booking start/end/custom fields, backfill from legacy `booking_date`).
+
 ## Supabase setup
 
 1. Open Supabase SQL editor.
-2. Run `supabase/schema.sql`.
-3. If RLS is enabled, add policies to allow operations required by this app.
+2. For a fresh DB: run `supabase/schema.sql`.
+3. For an existing DB: run `supabase/migrations/0001_upgrade_existing_schema.sql`.
+4. If RLS is enabled, add policies to allow operations required by this app.
 
 ## Vercel deployment
 
