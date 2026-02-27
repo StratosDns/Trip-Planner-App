@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+trip_planner.db
+.env
+.env.local
