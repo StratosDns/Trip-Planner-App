@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{{ trip['title'] }} — {{ trip['destination'] }}</h2>
+<p>{{ trip['start_date_display'] }} to {{ trip['end_date_display'] }}</p>
+
+<section class="grid-two">
+  <article class="card">
+    <h3>Invite Participant</h3>
+    <form method="post" action="{{ url_for('invite_member', trip_id=trip['id']) }}" class="form-grid">
+      <label>User email <input type="email" name="email" required /></label>
+      <button type="submit">Invite</button>
+    </form>
+    <p class="muted">
+      Registered users receive an in-app notification to accept/deny.
+      Unregistered users receive a signup email, and their invite appears in notifications after signup.
+    </p>
+
+    <h4>Participants</h4>
+    <ul>
+      {% for member in members %}
+        <li>{{ member['name'] }} ({{ member['email'] }}) - {{ member['role'] }}</li>
+      {% endfor %}
+    </ul>
+  </article>
+
+  <article class="card">
+    <h3>Add Booking</h3>
+    <form method="post" action="{{ url_for('add_booking', trip_id=trip['id']) }}" class="form-grid">
+      <label>Sector
+        <select name="sector" required>
+          <option value="">Select one</option>
+          {% for sector in sectors %}
+            <option value="{{ sector }}">{{ sector|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Title <input type="text" name="title" required /></label>
+      <label>Provider <input type="text" name="provider" /></label>
+      <label>Confirmation code <input type="text" name="confirmation_code" /></label>
+      <label>Start date (dd/mm/yyyy) <input type="text" name="start_date" placeholder="dd/mm/yyyy" required /></label>
+      <label>End date (dd/mm/yyyy, optional) <input type="text" name="end_date" placeholder="dd/mm/yyyy" /></label>
+      <label>Custom fields (one per line, key:value)
+        <textarea name="custom_fields" rows="3" placeholder="seat: 14A&#10;meal: vegetarian"></textarea>
+      </label>
+      <label>Notes <textarea name="notes" rows="3"></textarea></label>
+      <button type="submit">Save booking</button>
+    </form>
+  </article>
+</section>
+
+<section class="card">
+  <h3>Trip Bookings</h3>
+  {% if bookings %}
+    <div class="table-wrap">
+      <table class="booking-table">
+        <thead>
+          <tr>
+            <th>Sector</th>
+            <th>Title</th>
+            <th>Provider</th>
+            <th>Code</th>
+            <th>Start</th>
+            <th>End</th>
+            {% for field_key in custom_field_columns %}
+              <th>{{ field_key }}</th>
+            {% endfor %}
+            <th>Notes</th>
+            <th>Edit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for booking in bookings %}
+            {% set fields = booking.get('custom_fields') or {} %}
+            <tr>
+              <td>{{ booking['sector'] }}</td>
+              <td><div class="scroll-chip">{{ booking['title']|linkify_compact }}</div></td>
+              <td><div class="scroll-chip">{{ (booking['provider'] or '-')|linkify_compact }}</div></td>
+              <td><div class="scroll-chip">{{ (booking['confirmation_code'] or '-')|linkify_compact }}</div></td>
+              <td>{{ booking['start_date_display'] }}</td>
+              <td>{{ booking['end_date_display'] }}</td>
+              {% for field_key in custom_field_columns %}
+                <td><div class="scroll-chip">{{ (fields.get(field_key, '-') if fields is mapping else '-')|linkify_compact }}</div></td>
+              {% endfor %}
+              <td><div class="scroll-chip">{{ (booking['notes'] or '-')|linkify_compact }}</div></td>
+              <td>
+                <details>
+                  <summary>Edit</summary>
+                  <form method="post" action="{{ url_for('edit_booking', trip_id=trip['id'], booking_id=booking['id']) }}" class="form-grid compact-form">
+                    <label>Sector
+                      <select name="sector" required>
+                        {% for sector in sectors %}
+                          <option value="{{ sector }}" {% if booking['sector'] == sector %}selected{% endif %}>{{ sector|capitalize }}</option>
+                        {% endfor %}
+                      </select>
+                    </label>
+                    <label>Title <input type="text" name="title" value="{{ booking['title'] }}" required /></label>
+                    <label>Provider <input type="text" name="provider" value="{{ booking['provider'] or '' }}" /></label>
+                    <label>Confirmation code <input type="text" name="confirmation_code" value="{{ booking['confirmation_code'] or '' }}" /></label>
+                    <label>Start (dd/mm/yyyy) <input type="text" name="start_date" value="{{ booking['start_date_display'] if booking['start_date_display'] != '-' else '' }}" required /></label>
+                    <label>End (dd/mm/yyyy, optional) <input type="text" name="end_date" value="{{ booking['end_date_display'] if booking['end_date_display'] != '-' else '' }}" /></label>
+                    <label>Custom fields
+                      <textarea name="custom_fields" rows="2">{{ booking['custom_fields_text'] }}</textarea>
+                    </label>
+                    <label>Notes <textarea name="notes" rows="2">{{ booking['notes'] or '' }}</textarea></label>
+                    <button type="submit">Update booking</button>
+                  </form>
+                </details>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p>No bookings yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
