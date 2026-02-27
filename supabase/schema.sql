@@ -19,7 +19,7 @@ create table if not exists public.trips (
 create table if not exists public.trip_members (
   trip_id bigint not null references public.trips(id) on delete cascade,
   user_id bigint not null references public.users(id) on delete cascade,
-  role text default 'member',
+  role text default 'member' check (role in ('owner','member','observer')),
   added_at timestamptz default now(),
   primary key (trip_id, user_id)
 );
@@ -30,6 +30,7 @@ create table if not exists public.pending_invites (
   email text not null,
   invited_by bigint not null references public.users(id),
   status text not null default 'pending',
+  invite_role text not null default 'member' check (invite_role in ('member','observer')),
   email_sent_at timestamptz,
   created_at timestamptz default now(),
   unique (trip_id, email)
@@ -42,6 +43,7 @@ create table if not exists public.notifications (
   type text not null,
   message text not null,
   status text not null default 'pending',
+  invite_role text not null default 'member' check (invite_role in ('member','observer')),
   responded_at timestamptz,
   created_at timestamptz default now()
 );

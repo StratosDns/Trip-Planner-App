@@ -25,6 +25,13 @@ A collaborative trip planner where authenticated users can:
 - Bookings can now be edited directly from trip details page.
 - Editable fields: sector, title, provider, confirmation code, start/end date, notes, custom fields.
 
+## Role management
+
+- `owner`: all privileges, can invite with assigned role and change participant roles.
+- `member`: can add/edit bookings.
+- `observer`: read-only for trip details and bookings.
+- any non-owner participant can leave the trip.
+
 ## Date format
 
 The UI expects date input in `dd/mm/yyyy` format.
@@ -75,7 +82,9 @@ This script alters existing tables to the latest app expectations (notifications
 
 1. Open Supabase SQL editor.
 2. For a fresh DB: run `supabase/schema.sql`.
-3. For an existing DB: run `supabase/migrations/0001_upgrade_existing_schema.sql`.
+3. For an existing DB, run migrations in order:
+   - `supabase/migrations/0001_upgrade_existing_schema.sql`
+   - `supabase/migrations/0002_trip_role_management.sql`
 4. If RLS is enabled, add policies to allow operations required by this app.
 
 ## Vercel deployment

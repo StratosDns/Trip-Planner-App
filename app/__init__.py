@@ -14,6 +14,7 @@ from .auth import login_required
 from .db import close_db, get_supabase, init_db
 
 SECTORS = ["stay", "flight", "attraction"]
+ASSIGNABLE_ROLES = ["member", "observer"]
 DATE_FORMAT = "%d/%m/%Y"
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,12 @@ def relation_to_object(value):
     if isinstance(value, dict):
         return value
     return {}
+
+
+def mask_links_text(value):
+    if value is None:
+        return "-"
+    return re.sub(r"https?://\S+", "Link", str(value))
 
 
 def linkify_compact(value):
@@ -195,6 +202,10 @@ def create_app():
     def _linkify_compact_filter(value):
         return linkify_compact(value)
 
+    @app.template_filter("mask_links")
+    def _mask_links_filter(value):
+        return mask_links_text(value)
+
     @app.context_processor
     def inject_notification_count():
         user_id = session.get("user_id")
@@ -211,18 +222,21 @@ def create_app():
         )
         return {"pending_notification_count": len(rows)}
 
-    def ensure_member(trip_id, user_id):
+    def get_trip_role(trip_id, user_id):
         supabase = get_supabase()
-        member = (
+        row = _first(
             supabase.table("trip_members")
-            .select("trip_id")
+            .select("role")
             .eq("trip_id", trip_id)
             .eq("user_id", user_id)
             .limit(1)
             .execute()
             .data
         )
-        return bool(member)
+        return (row or {}).get("role")
+
+    def ensure_member(trip_id, user_id):
+        return get_trip_role(trip_id, user_id) is not None
 
     @app.route("/")
     def landing():
@@ -256,7 +270,7 @@ def create_app():
 
             pending_invites = (
                 supabase.table("pending_invites")
-                .select("id,trip_id")
+                .select("id,trip_id,invite_role")
                 .eq("email", email)
                 .eq("status", "pending")
                 .execute()
@@ -270,6 +284,7 @@ def create_app():
                         "type": "trip_invite",
                         "message": "You were invited to join a trip.",
                         "status": "pending",
+                        "invite_role": invite.get("invite_role", "member"),
                     }
                 ).execute()
                 supabase.table("pending_invites").update({"status": "converted"}).eq("id", invite["id"]).execute()
@@ -363,7 +378,7 @@ def create_app():
         supabase = get_supabase()
         notification = _first(
             supabase.table("notifications")
-            .select("id,trip_id,status")
+            .select("id,trip_id,status,invite_role")
             .eq("id", notification_id)
             .eq("user_id", user_id)
             .limit(1)
@@ -376,7 +391,7 @@ def create_app():
 
         if action == "accept":
             supabase.table("trip_members").upsert(
-                {"trip_id": notification["trip_id"], "user_id": user_id, "role": "member"},
+                {"trip_id": notification["trip_id"], "user_id": user_id, "role": notification.get("invite_role") or "member"},
                 on_conflict="trip_id,user_id",
             ).execute()
 
@@ -429,7 +444,8 @@ def create_app():
     @app.route("/trips/<int:trip_id>")
     @login_required
     def trip_details(trip_id):
-        if not ensure_member(trip_id, session["user_id"]):
+        role = get_trip_role(trip_id, session["user_id"])
+        if role is None:
             flash("You do not have access to this trip.", "danger")
             return redirect(url_for("dashboard"))
 
@@ -450,7 +466,7 @@ def create_app():
 
         member_rows = (
             supabase.table("trip_members")
-            .select("role,users(name,email)")
+            .select("user_id,role,users(id,name,email)")
             .eq("trip_id", trip_id)
             .order("role", desc=True)
             .execute()
@@ -461,6 +477,7 @@ def create_app():
                 "name": relation_to_object(row.get("users")).get("name", "Unknown"),
                 "email": relation_to_object(row.get("users")).get("email", "-"),
                 "role": row.get("role", "member"),
+                "user_id": row.get("user_id"),
             }
             for row in member_rows
         ]
@@ -476,6 +493,7 @@ def create_app():
             booking["custom_fields_text"] = custom_fields_to_text(fields)
 
         custom_field_columns = sorted(custom_field_keys)
+        current_user_role = get_trip_role(trip_id, session["user_id"])
 
         return render_template(
             "trip_details.html",
@@ -484,16 +502,28 @@ def create_app():
             bookings=bookings,
             sectors=SECTORS,
             custom_field_columns=custom_field_columns,
+            current_user_role=current_user_role,
+            can_manage_roles=current_user_role == "owner",
+            can_edit_bookings=current_user_role in {"owner", "member"},
+            can_open_links=current_user_role != "observer",
+            assignable_roles=ASSIGNABLE_ROLES,
+            current_user_id=session["user_id"],
         )
 
     @app.route("/trips/<int:trip_id>/invite", methods=["POST"])
     @login_required
     def invite_member(trip_id):
-        if not ensure_member(trip_id, session["user_id"]):
-            flash("You do not have access to invite users for this trip.", "danger")
-            return redirect(url_for("dashboard"))
+        role = get_trip_role(trip_id, session["user_id"])
+        if role != "owner":
+            flash("Only the trip owner can invite and assign roles.", "danger")
+            return redirect(url_for("trip_details", trip_id=trip_id))
 
         email = request.form.get("email", "").strip().lower()
+        invite_role = request.form.get("invite_role", "member").strip().lower()
+        if invite_role not in ASSIGNABLE_ROLES:
+            flash("Invalid invite role.", "danger")
+            return redirect(url_for("trip_details", trip_id=trip_id))
+
         supabase = get_supabase()
 
         trip = _first(supabase.table("trips").select("id,title").eq("id", trip_id).limit(1).execute().data)
@@ -509,6 +539,7 @@ def create_app():
                     "type": "trip_invite",
                     "message": "You have been invited to a trip. Accept or deny.",
                     "status": "pending",
+                    "invite_role": invite_role,
                 }
             ).execute()
             flash("Invitation sent as in-app notification.", "success")
@@ -522,6 +553,7 @@ def create_app():
                             "email": email,
                             "invited_by": session["user_id"],
                             "status": "pending",
+                            "invite_role": invite_role,
                         },
                         on_conflict="trip_id,email",
                     )
@@ -553,9 +585,13 @@ def create_app():
     @app.route("/trips/<int:trip_id>/bookings", methods=["POST"])
     @login_required
     def add_booking(trip_id):
-        if not ensure_member(trip_id, session["user_id"]):
+        role = get_trip_role(trip_id, session["user_id"])
+        if role is None:
             flash("You do not have access to this trip.", "danger")
             return redirect(url_for("dashboard"))
+        if role == "observer":
+            flash("Observers cannot modify bookings.", "warning")
+            return redirect(url_for("trip_details", trip_id=trip_id))
 
         sector = request.form.get("sector", "").strip().lower()
         title = request.form.get("title", "").strip()
@@ -598,7 +634,8 @@ def create_app():
     @app.route("/trips/<int:trip_id>/bookings/<int:booking_id>/edit", methods=["POST"])
     @login_required
     def edit_booking(trip_id, booking_id):
-        if not ensure_member(trip_id, session["user_id"]):
+        role = get_trip_role(trip_id, session["user_id"])
+        if role is None:
             flash("You do not have access to this trip.", "danger")
             return redirect(url_for("dashboard"))
 
@@ -652,5 +689,46 @@ def create_app():
 
         flash("Booking updated.", "success")
         return redirect(url_for("trip_details", trip_id=trip_id))
+
+
+    @app.route("/trips/<int:trip_id>/members/<int:member_user_id>/role", methods=["POST"])
+    @login_required
+    def update_member_role(trip_id, member_user_id):
+        role = get_trip_role(trip_id, session["user_id"])
+        if role != "owner":
+            flash("Only owner can manage participant roles.", "danger")
+            return redirect(url_for("trip_details", trip_id=trip_id))
+
+        new_role = request.form.get("role", "").strip().lower()
+        if new_role not in ASSIGNABLE_ROLES:
+            flash("Invalid role selection.", "danger")
+            return redirect(url_for("trip_details", trip_id=trip_id))
+
+        target_role = get_trip_role(trip_id, member_user_id)
+        if target_role is None:
+            flash("Participant not found.", "danger")
+            return redirect(url_for("trip_details", trip_id=trip_id))
+        if target_role == "owner":
+            flash("Owner role cannot be changed.", "warning")
+            return redirect(url_for("trip_details", trip_id=trip_id))
+
+        get_supabase().table("trip_members").update({"role": new_role}).eq("trip_id", trip_id).eq("user_id", member_user_id).execute()
+        flash("Participant role updated.", "success")
+        return redirect(url_for("trip_details", trip_id=trip_id))
+
+    @app.route("/trips/<int:trip_id>/leave", methods=["POST"])
+    @login_required
+    def leave_trip(trip_id):
+        role = get_trip_role(trip_id, session["user_id"])
+        if role is None:
+            flash("You are not a participant of this trip.", "warning")
+            return redirect(url_for("dashboard"))
+        if role == "owner":
+            flash("Owner cannot leave the trip. Assign ownership manually first.", "warning")
+            return redirect(url_for("trip_details", trip_id=trip_id))
+
+        get_supabase().table("trip_members").delete().eq("trip_id", trip_id).eq("user_id", session["user_id"]).execute()
+        flash("You left the trip.", "info")
+        return redirect(url_for("dashboard"))
 
     return app

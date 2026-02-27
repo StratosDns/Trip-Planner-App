@@ -137,3 +137,7 @@ pre { margin: 0; white-space: pre-wrap; font-family: inherit; overflow-wrap: any
   margin-bottom: 0.8rem;
 }
 .modal-form { max-height: 72vh; overflow-y: auto; padding-right: 0.35rem; }
+
+.inline-role-form { display: inline-flex; gap: 0.4rem; margin-left: 0.6rem; align-items: center; }
+.inline-role-form select { width: auto; min-width: 110px; margin-top: 0; }
+.inline-role-form button { padding: 0.35rem 0.7rem; }
