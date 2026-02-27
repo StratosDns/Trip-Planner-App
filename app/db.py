@@ -1,10 +1,10 @@
 import os
 
 from flask import g
-from supabase import Client, create_client
+from supabase import create_client
 
 
-def get_supabase() -> Client:
+def get_supabase():
     if "supabase" not in g:
         supabase_url = os.getenv("SUPABASE_URL")
         supabase_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")

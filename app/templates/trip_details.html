@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 <h2>{{ trip['title'] }} — {{ trip['destination'] }}</h2>
-<p>{{ trip['start_date'] or 'TBD' }} to {{ trip['end_date'] or 'TBD' }}</p>
+<p>{{ trip['start_date_display'] }} to {{ trip['end_date_display'] }}</p>
 
 <section class="grid-two">
   <article class="card">
@@ -10,6 +10,10 @@
       <label>User email <input type="email" name="email" required /></label>
       <button type="submit">Invite</button>
     </form>
+    <p class="muted">
+      Registered users receive an in-app notification to accept/deny.
+      Unregistered emails are saved as pending invites for signup follow-up.
+    </p>
 
     <h4>Participants</h4>
     <ul>
@@ -33,7 +37,11 @@
       <label>Title <input type="text" name="title" required /></label>
       <label>Provider <input type="text" name="provider" /></label>
       <label>Confirmation code <input type="text" name="confirmation_code" /></label>
-      <label>Booking date <input type="date" name="booking_date" /></label>
+      <label>Start date (dd/mm/yyyy) <input type="text" name="start_date" placeholder="dd/mm/yyyy" required /></label>
+      <label>End date (dd/mm/yyyy) <input type="text" name="end_date" placeholder="dd/mm/yyyy" /></label>
+      <label>Custom fields (one per line, key:value)
+        <textarea name="custom_fields" rows="3" placeholder="seat: 14A&#10;meal: vegetarian"></textarea>
+      </label>
       <label>Notes <textarea name="notes" rows="3"></textarea></label>
       <button type="submit">Save booking</button>
     </form>
@@ -50,7 +58,9 @@
           <th>Title</th>
           <th>Provider</th>
           <th>Code</th>
-          <th>Date</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Custom fields</th>
           <th>Notes</th>
         </tr>
       </thead>
@@ -61,7 +71,9 @@
             <td>{{ booking['title'] }}</td>
             <td>{{ booking['provider'] or '-' }}</td>
             <td>{{ booking['confirmation_code'] or '-' }}</td>
-            <td>{{ booking['booking_date'] or '-' }}</td>
+            <td>{{ booking['start_date_display'] }}</td>
+            <td>{{ booking['end_date_display'] }}</td>
+            <td><pre>{{ booking['custom_fields_text'] or '-' }}</pre></td>
             <td>{{ booking['notes'] or '-' }}</td>
           </tr>
         {% endfor %}

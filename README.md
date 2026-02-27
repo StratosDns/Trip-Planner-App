@@ -3,26 +3,32 @@
 A collaborative trip planner where authenticated users can:
 
 - Create and manage trips
-- Invite other users to join each trip
+- Invite other users to join each trip with invitation notifications
 - Add bookings under sectors:
   - Stay bookings
   - Flight bookings
   - Attraction / activity bookings
+- Store booking start/end dates and custom booking fields
 - Access trip details only if they are participants
+
+## Invitation flow
+
+- If invited email is already registered:
+  - the user gets an in-app notification and can accept or deny.
+- If invited email is not registered:
+  - invite is stored in `pending_invites`
+  - after that user registers, invitation appears in their notifications.
+
+## Date format
+
+The UI expects date input in `dd/mm/yyyy` format.
+Dates are stored in Supabase as `date` values.
 
 ## Tech stack
 
 - Flask app + Jinja templates
 - Supabase (PostgREST via project URL + key)
 - Vercel Python runtime for deployment
-
-## Do I need a file with Supabase credentials?
-
-You **do not** need to commit a credentials file.
-Use environment variables in Vercel and locally.
-
-For convenience, this repo includes `.env.example` with the expected keys.
-Create your own local `.env` from it, but never commit real secrets.
 
 ## Environment variables
 
@@ -32,7 +38,7 @@ Set these in Vercel Project Settings and local environment:
   - Your project URL, e.g.:
     `https://ahutxsslectfarulmiyz.supabase.co`
 - `SUPABASE_ANON_KEY`
-  - Your anon key (public key used by the app client)
+  - Your anon key
 - `SECRET_KEY`
   - Flask session secret
 
@@ -50,6 +56,12 @@ python run.py
 
 Open `http://127.0.0.1:5000`.
 
+## Supabase setup
+
+1. Open Supabase SQL editor.
+2. Run `supabase/schema.sql`.
+3. If RLS is enabled, add policies to allow operations required by this app.
+
 ## Vercel deployment
 
 This repo already includes:
@@ -62,9 +74,3 @@ Steps:
 1. Import the repo into Vercel.
 2. Add env vars: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SECRET_KEY`.
 3. Deploy.
-
-## Important Supabase note
-
-This app now uses Supabase REST API through the project URL + key.
-So your tables (`users`, `trips`, `trip_members`, `bookings`) must exist in Supabase.
-If Row Level Security is enabled, add policies that allow the operations your app performs.
