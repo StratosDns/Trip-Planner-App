@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="hero">
+  <h2>Plan trips together. Keep every booking in one place.</h2>
+  <p>
+    Create a trip, invite participants, and centralize stay bookings, flights,
+    and attraction reservations for everyone in the group.
+  </p>
+  <div class="actions">
+    <a class="button" href="{{ url_for('register') }}">Create account</a>
+    <a class="button secondary" href="{{ url_for('login') }}">Login</a>
+  </div>
+</section>
+{% endblock %}

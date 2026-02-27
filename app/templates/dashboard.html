@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{{ session.get('user_name') }}'s Dashboard</h2>
+
+<section class="grid-two">
+  <article class="card">
+    <h3>Create a New Trip</h3>
+    <form method="post" action="{{ url_for('create_trip') }}" class="form-grid">
+      <label>Trip title <input type="text" name="title" required /></label>
+      <label>Destination <input type="text" name="destination" required /></label>
+      <label>Start date <input type="date" name="start_date" /></label>
+      <label>End date <input type="date" name="end_date" /></label>
+      <button type="submit">Create trip</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h3>Your Trips</h3>
+    {% if trips %}
+      <ul>
+        {% for trip in trips %}
+          <li>
+            <a href="{{ url_for('trip_details', trip_id=trip['id']) }}">{{ trip['title'] }}</a>
+            — {{ trip['destination'] }}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No trips yet.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="card">
+  <h3>Your Bookings by Sector</h3>
+  {% for sector in sectors %}
+    <h4>{{ sector|capitalize }}</h4>
+    {% set items = by_sector.get(sector, []) %}
+    {% if items %}
+      <ul>
+        {% for booking in items %}
+          <li>
+            <strong>{{ booking['title'] }}</strong> ({{ booking['trip_title'] }})
+            {% if booking['provider'] %} — {{ booking['provider'] }}{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No {{ sector }} bookings.</p>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endblock %}
