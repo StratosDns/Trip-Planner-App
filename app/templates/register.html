@@ -3,7 +3,7 @@
 <h2>Register</h2>
 <form method="post" class="card form-grid">
   <label>Name <input type="text" name="name" required /></label>
-  <label>Email <input type="email" name="email" required /></label>
+  <label>Email <input type="email" name="email" value="{{ prefill_email or '' }}" required /></label>
   <label>Password <input type="password" name="password" required /></label>
   <button type="submit">Create account</button>
 </form>

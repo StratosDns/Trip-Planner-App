@@ -12,7 +12,7 @@
     </form>
     <p class="muted">
       Registered users receive an in-app notification to accept/deny.
-      Unregistered emails are saved as pending invites for signup follow-up.
+      Unregistered users receive a signup email, and their invite appears in notifications after signup.
     </p>
 
     <h4>Participants</h4>
@@ -62,6 +62,7 @@
           <th>End</th>
           <th>Custom fields</th>
           <th>Notes</th>
+          <th>Edit</th>
         </tr>
       </thead>
       <tbody>
@@ -75,6 +76,30 @@
             <td>{{ booking['end_date_display'] }}</td>
             <td><pre>{{ booking['custom_fields_text'] or '-' }}</pre></td>
             <td>{{ booking['notes'] or '-' }}</td>
+            <td>
+              <details>
+                <summary>Edit</summary>
+                <form method="post" action="{{ url_for('edit_booking', trip_id=trip['id'], booking_id=booking['id']) }}" class="form-grid compact-form">
+                  <label>Sector
+                    <select name="sector" required>
+                      {% for sector in sectors %}
+                        <option value="{{ sector }}" {% if booking['sector'] == sector %}selected{% endif %}>{{ sector|capitalize }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label>Title <input type="text" name="title" value="{{ booking['title'] }}" required /></label>
+                  <label>Provider <input type="text" name="provider" value="{{ booking['provider'] or '' }}" /></label>
+                  <label>Confirmation code <input type="text" name="confirmation_code" value="{{ booking['confirmation_code'] or '' }}" /></label>
+                  <label>Start (dd/mm/yyyy) <input type="text" name="start_date" value="{{ booking['start_date_display'] if booking['start_date_display'] != '-' else '' }}" required /></label>
+                  <label>End (dd/mm/yyyy) <input type="text" name="end_date" value="{{ booking['end_date_display'] if booking['end_date_display'] != '-' else '' }}" /></label>
+                  <label>Custom fields
+                    <textarea name="custom_fields" rows="2">{{ booking['custom_fields_text'] }}</textarea>
+                  </label>
+                  <label>Notes <textarea name="notes" rows="2">{{ booking['notes'] or '' }}</textarea></label>
+                  <button type="submit">Update booking</button>
+                </form>
+              </details>
+            </td>
           </tr>
         {% endfor %}
       </tbody>

@@ -3,8 +3,8 @@
 A collaborative trip planner where authenticated users can:
 
 - Create and manage trips
-- Invite other users to join each trip with invitation notifications
-- Add bookings under sectors:
+- Invite users with notification/email flow
+- Add and edit bookings under sectors:
   - Stay bookings
   - Flight bookings
   - Attraction / activity bookings
@@ -16,8 +16,14 @@ A collaborative trip planner where authenticated users can:
 - If invited email is already registered:
   - the user gets an in-app notification and can accept or deny.
 - If invited email is not registered:
-  - invite is stored in `pending_invites`
-  - after that user registers, invitation appears in their notifications.
+  - app stores a `pending_invites` record,
+  - app sends a signup email to that address,
+  - after signup, invite is converted into in-app notification automatically.
+
+## Booking edits
+
+- Bookings can now be edited directly from trip details page.
+- Editable fields: sector, title, provider, confirmation code, start/end date, notes, custom fields.
 
 ## Date format
 
@@ -35,12 +41,14 @@ Dates are stored in Supabase as `date` values.
 Set these in Vercel Project Settings and local environment:
 
 - `SUPABASE_URL`
-  - Your project URL, e.g.:
-    `https://ahutxsslectfarulmiyz.supabase.co`
 - `SUPABASE_ANON_KEY`
-  - Your anon key
 - `SECRET_KEY`
-  - Flask session secret
+- `APP_BASE_URL` (used in email signup link)
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `SMTP_FROM`
 
 ## Local run
 
@@ -49,7 +57,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# then edit .env values
 export $(grep -v '^#' .env | xargs)
 python run.py
 ```
@@ -72,5 +79,5 @@ This repo already includes:
 Steps:
 
 1. Import the repo into Vercel.
-2. Add env vars: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SECRET_KEY`.
+2. Add env vars listed above.
 3. Deploy.

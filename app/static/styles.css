@@ -40,3 +40,6 @@ pre { margin: 0; white-space: pre-wrap; font-family: inherit; }
   .grid-two { grid-template-columns: 1fr; }
   .notification-row { flex-direction: column; align-items: flex-start; }
 }
+
+summary { cursor: pointer; color: #2563eb; }
+.compact-form { margin-top: 0.6rem; min-width: 220px; }

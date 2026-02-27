@@ -30,6 +30,7 @@ create table if not exists public.pending_invites (
   email text not null,
   invited_by bigint not null references public.users(id),
   status text not null default 'pending',
+  email_sent_at timestamptz,
   created_at timestamptz default now(),
   unique (trip_id, email)
 );
