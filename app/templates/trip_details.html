@@ -73,15 +73,15 @@
             {% set fields = booking.get('custom_fields') or {} %}
             <tr>
               <td>{{ booking['sector'] }}</td>
-              <td>{{ booking['title'] }}</td>
-              <td>{{ booking['provider'] or '-' }}</td>
-              <td>{{ booking['confirmation_code'] or '-' }}</td>
+              <td><div class="scroll-chip">{{ booking['title']|linkify_compact }}</div></td>
+              <td><div class="scroll-chip">{{ (booking['provider'] or '-')|linkify_compact }}</div></td>
+              <td><div class="scroll-chip">{{ (booking['confirmation_code'] or '-')|linkify_compact }}</div></td>
               <td>{{ booking['start_date_display'] }}</td>
               <td>{{ booking['end_date_display'] }}</td>
               {% for field_key in custom_field_columns %}
-                <td>{{ fields.get(field_key, '-') if fields is mapping else '-' }}</td>
+                <td><div class="scroll-chip">{{ (fields.get(field_key, '-') if fields is mapping else '-')|linkify_compact }}</div></td>
               {% endfor %}
-              <td>{{ booking['notes'] or '-' }}</td>
+              <td><div class="scroll-chip">{{ (booking['notes'] or '-')|linkify_compact }}</div></td>
               <td>
                 <details>
                   <summary>Edit</summary>

@@ -3,9 +3,11 @@ from datetime import datetime
 from email.message import EmailMessage
 import logging
 import os
+import re
 import smtplib
 
 from flask import Flask, render_template, request, redirect, url_for, flash, session
+from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .auth import login_required
@@ -69,6 +71,22 @@ def relation_to_object(value):
     if isinstance(value, dict):
         return value
     return {}
+
+
+def linkify_compact(value):
+    if value is None:
+        return Markup('-')
+    text = str(value)
+    url_pattern = re.compile(r"https?://\S+")
+
+    def _repl(match):
+        url = match.group(0)
+        safe_url = escape(url)
+        return f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer">Link</a>'
+
+    escaped = escape(text)
+    linked = url_pattern.sub(lambda m: _repl(m), str(escaped))
+    return Markup(linked)
 
 
 def send_signup_invite_email(invited_email, inviter_name, trip_title):
@@ -172,6 +190,10 @@ def create_app():
 
     init_db()
     app.teardown_appcontext(close_db)
+
+    @app.template_filter("linkify_compact")
+    def _linkify_compact_filter(value):
+        return linkify_compact(value)
 
     @app.context_processor
     def inject_notification_count():
