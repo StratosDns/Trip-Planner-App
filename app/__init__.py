@@ -1,13 +1,17 @@
 from collections import defaultdict
 import os
-from werkzeug.security import generate_password_hash, check_password_hash
+
 from flask import Flask, render_template, request, redirect, url_for, flash, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
-from .db import get_db, close_db, init_db
 from .auth import login_required
-
+from .db import close_db, get_supabase, init_db
 
 SECTORS = ["stay", "flight", "attraction"]
+
+
+def _first(items):
+    return items[0] if items else None
 
 
 def create_app():
@@ -27,21 +31,31 @@ def create_app():
             name = request.form.get("name", "").strip()
             email = request.form.get("email", "").strip().lower()
             password = request.form.get("password", "")
+
             if not name or not email or not password:
                 flash("All fields are required.", "danger")
                 return redirect(url_for("register"))
 
-            db = get_db()
-            exists = db.execute("SELECT id FROM users WHERE email = %s", (email,)).fetchone()
-            if exists:
+            supabase = get_supabase()
+            existing = (
+                supabase.table("users")
+                .select("id")
+                .eq("email", email)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if existing:
                 flash("User with this email already exists.", "danger")
                 return redirect(url_for("register"))
 
-            db.execute(
-                "INSERT INTO users (name, email, password_hash) VALUES (%s, %s, %s)",
-                (name, email, generate_password_hash(password)),
-            )
-            db.commit()
+            supabase.table("users").insert(
+                {
+                    "name": name,
+                    "email": email,
+                    "password_hash": generate_password_hash(password),
+                }
+            ).execute()
             flash("Account created! Please log in.", "success")
             return redirect(url_for("login"))
 
@@ -53,8 +67,17 @@ def create_app():
             email = request.form.get("email", "").strip().lower()
             password = request.form.get("password", "")
 
-            db = get_db()
-            user = db.execute("SELECT * FROM users WHERE email = %s", (email,)).fetchone()
+            supabase = get_supabase()
+            users = (
+                supabase.table("users")
+                .select("id,name,password_hash")
+                .eq("email", email)
+                .limit(1)
+                .execute()
+                .data
+            )
+            user = _first(users)
+
             if user is None or not check_password_hash(user["password_hash"], password):
                 flash("Invalid email or password.", "danger")
                 return redirect(url_for("login"))
@@ -77,32 +100,39 @@ def create_app():
     @login_required
     def dashboard():
         user_id = session["user_id"]
-        db = get_db()
-        trips = db.execute(
-            """
-            SELECT t.*
-            FROM trips t
-            INNER JOIN trip_members tm ON tm.trip_id = t.id
-            WHERE tm.user_id = %s
-            ORDER BY t.start_date IS NULL, t.start_date, t.created_at DESC
-            """,
-            (user_id,),
-        ).fetchall()
+        supabase = get_supabase()
 
-        bookings = db.execute(
-            """
-            SELECT b.*, t.title AS trip_title
-            FROM bookings b
-            INNER JOIN trips t ON t.id = b.trip_id
-            INNER JOIN trip_members tm ON tm.trip_id = t.id
-            WHERE tm.user_id = %s
-            ORDER BY b.created_at DESC
-            """,
-            (user_id,),
-        ).fetchall()
+        membership_rows = (
+            supabase.table("trip_members").select("trip_id").eq("user_id", user_id).execute().data
+        )
+        trip_ids = [row["trip_id"] for row in membership_rows]
+
+        trips = []
+        bookings = []
+
+        if trip_ids:
+            trips = (
+                supabase.table("trips")
+                .select("id,title,destination,start_date,end_date,created_at")
+                .in_("id", trip_ids)
+                .order("start_date")
+                .execute()
+                .data
+            )
+
+            bookings = (
+                supabase.table("bookings")
+                .select("id,trip_id,sector,title,provider,confirmation_code,booking_date,notes,created_at,trips(title)")
+                .in_("trip_id", trip_ids)
+                .order("created_at", desc=True)
+                .execute()
+                .data
+            )
 
         by_sector = defaultdict(list)
         for booking in bookings:
+            trip_info = booking.get("trips") or {}
+            booking["trip_title"] = trip_info.get("title", "Unknown trip")
             by_sector[booking["sector"]].append(booking)
 
         return render_template("dashboard.html", trips=trips, by_sector=by_sector, sectors=SECTORS)
@@ -112,38 +142,57 @@ def create_app():
     def create_trip():
         title = request.form.get("title", "").strip()
         destination = request.form.get("destination", "").strip()
-        start_date = request.form.get("start_date", "")
-        end_date = request.form.get("end_date", "")
+        start_date = request.form.get("start_date", "") or None
+        end_date = request.form.get("end_date", "") or None
 
         if not title or not destination:
             flash("Trip title and destination are required.", "danger")
             return redirect(url_for("dashboard"))
 
-        db = get_db()
-        cur = db.execute(
-            """
-            INSERT INTO trips (title, destination, start_date, end_date, created_by)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (title, destination, start_date or None, end_date or None, session["user_id"]),
+        supabase = get_supabase()
+        trip_rows = (
+            supabase.table("trips")
+            .insert(
+                {
+                    "title": title,
+                    "destination": destination,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "created_by": session["user_id"],
+                }
+            )
+            .execute()
+            .data
         )
-        trip_id = cur.fetchone()["id"]
-        db.execute(
-            "INSERT INTO trip_members (trip_id, user_id, role) VALUES (%s, %s, 'owner')",
-            (trip_id, session["user_id"]),
-        )
-        db.commit()
+        trip = _first(trip_rows)
+        if not trip:
+            flash("Could not create trip.", "danger")
+            return redirect(url_for("dashboard"))
+
+        supabase.table("trip_members").upsert(
+            {
+                "trip_id": trip["id"],
+                "user_id": session["user_id"],
+                "role": "owner",
+            },
+            on_conflict="trip_id,user_id",
+        ).execute()
+
         flash("Trip created.", "success")
-        return redirect(url_for("trip_details", trip_id=trip_id))
+        return redirect(url_for("trip_details", trip_id=trip["id"]))
 
     def ensure_member(trip_id, user_id):
-        db = get_db()
-        member = db.execute(
-            "SELECT 1 FROM trip_members WHERE trip_id = %s AND user_id = %s",
-            (trip_id, user_id),
-        ).fetchone()
-        return member is not None
+        supabase = get_supabase()
+        member = (
+            supabase.table("trip_members")
+            .select("trip_id")
+            .eq("trip_id", trip_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return bool(member)
 
     @app.route("/trips/<int:trip_id>")
     @login_required
@@ -152,22 +201,41 @@ def create_app():
             flash("You do not have access to this trip.", "danger")
             return redirect(url_for("dashboard"))
 
-        db = get_db()
-        trip = db.execute("SELECT * FROM trips WHERE id = %s", (trip_id,)).fetchone()
-        members = db.execute(
-            """
-            SELECT u.name, u.email, tm.role
-            FROM trip_members tm
-            INNER JOIN users u ON u.id = tm.user_id
-            WHERE tm.trip_id = %s
-            ORDER BY tm.role DESC, u.name
-            """,
-            (trip_id,),
-        ).fetchall()
-        bookings = db.execute(
-            "SELECT * FROM bookings WHERE trip_id = %s ORDER BY booking_date IS NULL, booking_date, created_at DESC",
-            (trip_id,),
-        ).fetchall()
+        supabase = get_supabase()
+        trip = _first(
+            supabase.table("trips")
+            .select("id,title,destination,start_date,end_date")
+            .eq("id", trip_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+
+        member_rows = (
+            supabase.table("trip_members")
+            .select("role,users(name,email)")
+            .eq("trip_id", trip_id)
+            .order("role", desc=True)
+            .execute()
+            .data
+        )
+        members = [
+            {
+                "name": (row.get("users") or {}).get("name", "Unknown"),
+                "email": (row.get("users") or {}).get("email", "-"),
+                "role": row.get("role", "member"),
+            }
+            for row in member_rows
+        ]
+
+        bookings = (
+            supabase.table("bookings")
+            .select("id,sector,title,provider,confirmation_code,booking_date,notes,created_at")
+            .eq("trip_id", trip_id)
+            .order("booking_date")
+            .execute()
+            .data
+        )
 
         return render_template("trip_details.html", trip=trip, members=members, bookings=bookings, sectors=SECTORS)
 
@@ -179,21 +247,24 @@ def create_app():
             return redirect(url_for("dashboard"))
 
         email = request.form.get("email", "").strip().lower()
-        db = get_db()
-        user = db.execute("SELECT id FROM users WHERE email = %s", (email,)).fetchone()
+        supabase = get_supabase()
+
+        user = _first(
+            supabase.table("users").select("id").eq("email", email).limit(1).execute().data
+        )
         if not user:
             flash("User not found. Ask them to register first.", "danger")
             return redirect(url_for("trip_details", trip_id=trip_id))
 
-        db.execute(
-            """
-            INSERT INTO trip_members (trip_id, user_id, role)
-            VALUES (%s, %s, 'member')
-            ON CONFLICT (trip_id, user_id) DO NOTHING
-            """,
-            (trip_id, user["id"]),
-        )
-        db.commit()
+        supabase.table("trip_members").upsert(
+            {
+                "trip_id": trip_id,
+                "user_id": user["id"],
+                "role": "member",
+            },
+            on_conflict="trip_id,user_id",
+        ).execute()
+
         flash("Invitation processed.", "success")
         return redirect(url_for("trip_details", trip_id=trip_id))
 
@@ -206,24 +277,29 @@ def create_app():
 
         sector = request.form.get("sector", "").strip().lower()
         title = request.form.get("title", "").strip()
-        provider = request.form.get("provider", "").strip()
-        confirmation_code = request.form.get("confirmation_code", "").strip()
-        booking_date = request.form.get("booking_date", "").strip()
-        notes = request.form.get("notes", "").strip()
+        provider = request.form.get("provider", "").strip() or None
+        confirmation_code = request.form.get("confirmation_code", "").strip() or None
+        booking_date = request.form.get("booking_date", "").strip() or None
+        notes = request.form.get("notes", "").strip() or None
 
         if sector not in SECTORS or not title:
             flash("Booking sector and title are required.", "danger")
             return redirect(url_for("trip_details", trip_id=trip_id))
 
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO bookings (trip_id, sector, title, provider, confirmation_code, booking_date, notes, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (trip_id, sector, title, provider or None, confirmation_code or None, booking_date or None, notes or None, session["user_id"]),
-        )
-        db.commit()
+        supabase = get_supabase()
+        supabase.table("bookings").insert(
+            {
+                "trip_id": trip_id,
+                "sector": sector,
+                "title": title,
+                "provider": provider,
+                "confirmation_code": confirmation_code,
+                "booking_date": booking_date,
+                "notes": notes,
+                "created_by": session["user_id"],
+            }
+        ).execute()
+
         flash("Booking added.", "success")
         return redirect(url_for("trip_details", trip_id=trip_id))
 
