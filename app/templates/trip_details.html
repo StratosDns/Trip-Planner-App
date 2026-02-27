@@ -73,46 +73,65 @@
             {% set fields = booking.get('custom_fields') or {} %}
             <tr>
               <td>{{ booking['sector'] }}</td>
-              <td><div class="scroll-chip">{{ booking['title']|linkify_compact }}</div></td>
-              <td><div class="scroll-chip">{{ (booking['provider'] or '-')|linkify_compact }}</div></td>
-              <td><div class="scroll-chip">{{ (booking['confirmation_code'] or '-')|linkify_compact }}</div></td>
+              <td>{{ booking['title']|linkify_compact }}</td>
+              <td>{{ (booking['provider'] or '-')|linkify_compact }}</td>
+              <td>{{ (booking['confirmation_code'] or '-')|linkify_compact }}</td>
               <td>{{ booking['start_date_display'] }}</td>
               <td>{{ booking['end_date_display'] }}</td>
               {% for field_key in custom_field_columns %}
-                <td><div class="scroll-chip">{{ (fields.get(field_key, '-') if fields is mapping else '-')|linkify_compact }}</div></td>
+                <td>{{ (fields.get(field_key, '-') if fields is mapping else '-')|linkify_compact }}</td>
               {% endfor %}
-              <td><div class="scroll-chip">{{ (booking['notes'] or '-')|linkify_compact }}</div></td>
+              <td>{{ (booking['notes'] or '-')|linkify_compact }}</td>
               <td>
-                <details>
-                  <summary>Edit</summary>
-                  <form method="post" action="{{ url_for('edit_booking', trip_id=trip['id'], booking_id=booking['id']) }}" class="form-grid compact-form">
-                    <label>Sector
-                      <select name="sector" required>
-                        {% for sector in sectors %}
-                          <option value="{{ sector }}" {% if booking['sector'] == sector %}selected{% endif %}>{{ sector|capitalize }}</option>
-                        {% endfor %}
-                      </select>
-                    </label>
-                    <label>Title <input type="text" name="title" value="{{ booking['title'] }}" required /></label>
-                    <label>Provider <input type="text" name="provider" value="{{ booking['provider'] or '' }}" /></label>
-                    <label>Confirmation code <input type="text" name="confirmation_code" value="{{ booking['confirmation_code'] or '' }}" /></label>
-                    <label>Start (dd/mm/yyyy) <input type="text" name="start_date" value="{{ booking['start_date_display'] if booking['start_date_display'] != '-' else '' }}" required /></label>
-                    <label>End (dd/mm/yyyy, optional) <input type="text" name="end_date" value="{{ booking['end_date_display'] if booking['end_date_display'] != '-' else '' }}" /></label>
-                    <label>Custom fields
-                      <textarea name="custom_fields" rows="2">{{ booking['custom_fields_text'] }}</textarea>
-                    </label>
-                    <label>Notes <textarea name="notes" rows="2">{{ booking['notes'] or '' }}</textarea></label>
-                    <button type="submit">Update booking</button>
-                  </form>
-                </details>
+                <button type="button" class="button" onclick="openEditModal('edit-modal-{{ booking['id'] }}')">Edit</button>
               </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+
+    {% for booking in bookings %}
+      <dialog id="edit-modal-{{ booking['id'] }}" class="edit-modal">
+        <div class="modal-header">
+          <h4>Edit Booking</h4>
+          <button type="button" class="button secondary" onclick="closeEditModal('edit-modal-{{ booking['id'] }}')">Close</button>
+        </div>
+        <form method="post" action="{{ url_for('edit_booking', trip_id=trip['id'], booking_id=booking['id']) }}" class="form-grid modal-form">
+          <label>Sector
+            <select name="sector" required>
+              {% for sector in sectors %}
+                <option value="{{ sector }}" {% if booking['sector'] == sector %}selected{% endif %}>{{ sector|capitalize }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Title <input type="text" name="title" value="{{ booking['title'] }}" required /></label>
+          <label>Provider <input type="text" name="provider" value="{{ booking['provider'] or '' }}" /></label>
+          <label>Confirmation code <input type="text" name="confirmation_code" value="{{ booking['confirmation_code'] or '' }}" /></label>
+          <label>Start (dd/mm/yyyy) <input type="text" name="start_date" value="{{ booking['start_date_display'] if booking['start_date_display'] != '-' else '' }}" required /></label>
+          <label>End (dd/mm/yyyy, optional) <input type="text" name="end_date" value="{{ booking['end_date_display'] if booking['end_date_display'] != '-' else '' }}" /></label>
+          <label>Custom fields
+            <textarea name="custom_fields" rows="3">{{ booking['custom_fields_text'] }}</textarea>
+          </label>
+          <label>Notes <textarea name="notes" rows="3">{{ booking['notes'] or '' }}</textarea></label>
+          <button type="submit">Update booking</button>
+        </form>
+      </dialog>
+    {% endfor %}
   {% else %}
     <p>No bookings yet.</p>
   {% endif %}
 </section>
+
+<script>
+  function openEditModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) modal.showModal();
+  }
+
+  function closeEditModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) modal.close();
+  }
+</script>
 {% endblock %}

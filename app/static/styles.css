@@ -108,22 +108,32 @@ textarea { border-radius: 16px; }
 .muted { color: #64748b; }
 .table-wrap { width: 100%; overflow-x: auto; border-radius: 18px; }
 .booking-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; min-width: 920px; }
-.booking-table th, .booking-table td { border-bottom: 1px solid #e2e8f0; padding: 0.55rem; text-align: left; vertical-align: top; white-space: nowrap; }
+.booking-table th, .booking-table td { border-bottom: 1px solid #e2e8f0; padding: 0.55rem; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .notification-row { display: flex; justify-content: space-between; align-items: center; margin: 0.5rem 0; gap: 1rem; }
 .actions-inline { display: flex; gap: 0.5rem; }
 pre { margin: 0; white-space: pre-wrap; font-family: inherit; overflow-wrap: anywhere; word-break: break-word; }
-summary { cursor: pointer; color: #2563eb; }
-.compact-form { margin-top: 0.6rem; min-width: 220px; }
 @media (max-width: 860px) {
   .grid-two { grid-template-columns: 1fr; }
   .notification-row { flex-direction: column; align-items: flex-start; }
 }
 
-.scroll-chip {
-  max-width: 220px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  white-space: nowrap;
-  padding-bottom: 0.1rem;
+
+.booking-table a { color: #2563eb; font-weight: 600; text-decoration: none; }
+.edit-modal {
+  border: none;
+  border-radius: 18px;
+  width: min(720px, 92vw);
+  padding: 1rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
 }
-.scroll-chip a { color: #2563eb; font-weight: 600; text-decoration: none; }
+.edit-modal::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+.modal-form { max-height: 72vh; overflow-y: auto; padding-right: 0.35rem; }
