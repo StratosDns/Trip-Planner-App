@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trip Planner</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="logo-fab" href="{{ url_for('dashboard') }}" aria-label="Go to dashboard">✈</a>
+
+      <nav class="top-icons">
+        {% if session.get('user_id') %}
+          <a class="icon-btn bell" href="{{ url_for('dashboard') }}#notifications" aria-label="Notifications">
+            🔔
+            {% if pending_notification_count > 0 %}
+              <span class="notif-dot" aria-hidden="true"></span>
+            {% endif %}
+          </a>
+          <a class="icon-btn" href="{{ url_for('dashboard') }}" aria-label="Profile">👤</a>
+          <a class="pill-link" href="{{ url_for('logout') }}">Logout</a>
+        {% else %}
+          <a class="pill-link" href="{{ url_for('login') }}">Login</a>
+          <a class="pill-link" href="{{ url_for('register') }}">Register</a>
+        {% endif %}
+      </nav>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class="flash-list">
+          {% for category, message in messages %}
+            <li class="flash {{ category }}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
