@@ -54,7 +54,19 @@ def parse_custom_fields(raw_text):
 def custom_fields_to_text(fields):
     if not fields:
         return ""
+    if isinstance(fields, str):
+        return fields
+    if not isinstance(fields, dict):
+        return str(fields)
     return "\n".join(f"{k}: {v}" for k, v in fields.items())
+
+
+def relation_to_object(value):
+    if isinstance(value, list):
+        return value[0] if value else {}
+    if isinstance(value, dict):
+        return value
+    return {}
 
 
 def create_app():
@@ -203,14 +215,30 @@ def create_app():
                 .data
             )
 
-            bookings = (
-                supabase.table("bookings")
-                .select("id,trip_id,sector,title,provider,confirmation_code,start_date,end_date,custom_fields,created_at,trips(title)")
-                .in_("trip_id", trip_ids)
-                .order("created_at", desc=True)
-                .execute()
-                .data
-            )
+            try:
+                bookings = (
+                    supabase.table("bookings")
+                    .select("id,trip_id,sector,title,provider,confirmation_code,start_date,end_date,custom_fields,created_at,trips(title)")
+                    .in_("trip_id", trip_ids)
+                    .order("created_at", desc=True)
+                    .execute()
+                    .data
+                )
+            except Exception:
+                legacy_bookings = (
+                    supabase.table("bookings")
+                    .select("id,trip_id,sector,title,provider,confirmation_code,booking_date,notes,created_at,trips(title)")
+                    .in_("trip_id", trip_ids)
+                    .order("created_at", desc=True)
+                    .execute()
+                    .data
+                )
+                bookings = []
+                for item in legacy_bookings:
+                    item["start_date"] = item.get("booking_date")
+                    item["end_date"] = None
+                    item["custom_fields"] = {}
+                    bookings.append(item)
 
         for trip in trips:
             trip["start_date_display"] = format_date_display(trip.get("start_date"))
@@ -218,7 +246,7 @@ def create_app():
 
         by_sector = defaultdict(list)
         for booking in bookings:
-            trip_info = booking.get("trips") or {}
+            trip_info = relation_to_object(booking.get("trips"))
             booking["trip_title"] = trip_info.get("title", "Unknown trip")
             booking["start_date_display"] = format_date_display(booking.get("start_date"))
             booking["end_date_display"] = format_date_display(booking.get("end_date"))
@@ -234,7 +262,7 @@ def create_app():
             .data
         )
         for notification in notifications:
-            trip_info = notification.get("trips") or {}
+            trip_info = relation_to_object(notification.get("trips"))
             notification["trip_title"] = trip_info.get("title", "Trip")
 
         return render_template(
@@ -369,6 +397,9 @@ def create_app():
             .execute()
             .data
         )
+        if not trip:
+            flash("Trip not found.", "danger")
+            return redirect(url_for("dashboard"))
         trip["start_date_display"] = format_date_display(trip.get("start_date"))
         trip["end_date_display"] = format_date_display(trip.get("end_date"))
 
@@ -389,14 +420,30 @@ def create_app():
             for row in member_rows
         ]
 
-        bookings = (
-            supabase.table("bookings")
-            .select("id,sector,title,provider,confirmation_code,start_date,end_date,notes,custom_fields,created_at")
-            .eq("trip_id", trip_id)
-            .order("start_date")
-            .execute()
-            .data
-        )
+        try:
+            bookings = (
+                supabase.table("bookings")
+                .select("id,sector,title,provider,confirmation_code,start_date,end_date,notes,custom_fields,created_at")
+                .eq("trip_id", trip_id)
+                .order("start_date")
+                .execute()
+                .data
+            )
+        except Exception:
+            legacy_bookings = (
+                supabase.table("bookings")
+                .select("id,sector,title,provider,confirmation_code,booking_date,notes,created_at")
+                .eq("trip_id", trip_id)
+                .order("booking_date")
+                .execute()
+                .data
+            )
+            bookings = []
+            for item in legacy_bookings:
+                item["start_date"] = item.get("booking_date")
+                item["end_date"] = None
+                item["custom_fields"] = {}
+                bookings.append(item)
         for booking in bookings:
             booking["start_date_display"] = format_date_display(booking.get("start_date"))
             booking["end_date_display"] = format_date_display(booking.get("end_date"))
