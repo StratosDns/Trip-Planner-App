@@ -444,12 +444,25 @@ def create_app():
         ]
 
         bookings = fetch_trip_bookings(supabase, trip_id)
+        custom_field_keys = set()
         for booking in bookings:
             booking["start_date_display"] = format_date_display(booking.get("start_date"))
             booking["end_date_display"] = format_date_display(booking.get("end_date"))
-            booking["custom_fields_text"] = custom_fields_to_text(booking.get("custom_fields") or {})
+            fields = booking.get("custom_fields") or {}
+            if isinstance(fields, dict):
+                custom_field_keys.update(fields.keys())
+            booking["custom_fields_text"] = custom_fields_to_text(fields)
 
-        return render_template("trip_details.html", trip=trip, members=members, bookings=bookings, sectors=SECTORS)
+        custom_field_columns = sorted(custom_field_keys)
+
+        return render_template(
+            "trip_details.html",
+            trip=trip,
+            members=members,
+            bookings=bookings,
+            sectors=SECTORS,
+            custom_field_columns=custom_field_columns,
+        )
 
     @app.route("/trips/<int:trip_id>/invite", methods=["POST"])
     @login_required
