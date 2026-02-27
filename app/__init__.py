@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime
 from email.message import EmailMessage
+import logging
 import os
 import smtplib
 
@@ -12,6 +13,8 @@ from .db import close_db, get_supabase, init_db
 
 SECTORS = ["stay", "flight", "attraction"]
 DATE_FORMAT = "%d/%m/%Y"
+
+logger = logging.getLogger(__name__)
 
 
 def _first(items):
@@ -70,13 +73,20 @@ def relation_to_object(value):
 
 def send_signup_invite_email(invited_email, inviter_name, trip_title):
     smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_port_raw = os.getenv("SMTP_PORT", "587")
     smtp_user = os.getenv("SMTP_USER")
     smtp_password = os.getenv("SMTP_PASSWORD")
     smtp_from = os.getenv("SMTP_FROM") or smtp_user
     app_base_url = os.getenv("APP_BASE_URL", "")
 
     if not (smtp_host and smtp_user and smtp_password and smtp_from):
+        logger.warning("SMTP not fully configured; skipping invite email send")
+        return False
+
+    try:
+        smtp_port = int(smtp_port_raw)
+    except ValueError:
+        logger.exception("SMTP_PORT is invalid: %s", smtp_port_raw)
         return False
 
     register_url = f"{app_base_url.rstrip('/')}/register?email={invited_email}" if app_base_url else "/register"
@@ -91,11 +101,15 @@ def send_signup_invite_email(invited_email, inviter_name, trip_title):
         "After signup, your invitation will appear in your notifications."
     )
 
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.send_message(msg)
-    return True
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception:
+        logger.exception("Failed to send signup invite email to %s", invited_email)
+        return False
 
 
 def fetch_bookings_for_trip_ids(supabase, trip_ids):
@@ -462,28 +476,35 @@ def create_app():
             ).execute()
             flash("Invitation sent as in-app notification.", "success")
         else:
-            invite = _first(
-                supabase.table("pending_invites")
-                .upsert(
-                    {
-                        "trip_id": trip_id,
-                        "email": email,
-                        "invited_by": session["user_id"],
-                        "status": "pending",
-                    },
-                    on_conflict="trip_id,email",
-                )
-                .execute()
-                .data
-            )
-            email_sent = False
             try:
-                email_sent = send_signup_invite_email(email, inviter_name, trip_title)
+                invite = _first(
+                    supabase.table("pending_invites")
+                    .upsert(
+                        {
+                            "trip_id": trip_id,
+                            "email": email,
+                            "invited_by": session["user_id"],
+                            "status": "pending",
+                        },
+                        on_conflict="trip_id,email",
+                    )
+                    .execute()
+                    .data
+                )
             except Exception:
-                email_sent = False
+                logger.exception("Failed storing pending invite for %s", email)
+                flash("Could not store invitation. Please try again.", "danger")
+                return redirect(url_for("trip_details", trip_id=trip_id))
+
+            email_sent = send_signup_invite_email(email, inviter_name, trip_title)
 
             if invite and email_sent:
-                supabase.table("pending_invites").update({"email_sent_at": datetime.utcnow().isoformat()}).eq("id", invite["id"]).execute()
+                try:
+                    supabase.table("pending_invites").update(
+                        {"email_sent_at": datetime.utcnow().isoformat()}
+                    ).eq("id", invite["id"]).execute()
+                except Exception:
+                    logger.exception("Failed updating email_sent_at for pending invite %s", invite.get("id"))
                 flash("Invite stored and email sent successfully.", "success")
             elif email_sent:
                 flash("Invite email sent successfully.", "success")
