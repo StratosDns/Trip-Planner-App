@@ -204,6 +204,8 @@ def create_app():
 
     @app.route("/")
     def landing():
+        if session.get("user_id"):
+            return redirect(url_for("dashboard"))
         return render_template("landing.html")
 
     @app.route("/register", methods=["GET", "POST"])
