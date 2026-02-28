@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>My Profile</h2>
+<section class="card">
+  <p><strong>Name:</strong> {{ user.get('name', '-') }}</p>
+  <p><strong>Email:</strong> {{ user.get('email', '-') }}</p>
+</section>
+
+<section class="card">
+  <h3>Privacy settings</h3>
+  <form method="post" class="form-grid">
+    <label>Bio
+      <textarea name="bio" rows="4">{{ profile_data.get('bio') or '' }}</textarea>
+    </label>
+
+    <label>Name visibility
+      <select name="name_visibility">
+        {% for level in visibility_levels %}
+          <option value="{{ level }}" {% if profile_data.get('name_visibility') == level %}selected{% endif %}>{{ level|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Email visibility
+      <select name="email_visibility">
+        {% for level in visibility_levels %}
+          <option value="{{ level }}" {% if profile_data.get('email_visibility') == level %}selected{% endif %}>{{ level|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Bio visibility
+      <select name="bio_visibility">
+        {% for level in visibility_levels %}
+          <option value="{{ level }}" {% if profile_data.get('bio_visibility') == level %}selected{% endif %}>{{ level|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <button type="submit">Save profile</button>
+  </form>
+</section>
+{% endblock %}
