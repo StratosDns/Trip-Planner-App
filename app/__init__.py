@@ -411,7 +411,7 @@ def create_app():
 
         public_trips = (
             supabase.table("trips")
-            .select("id,title,destination,start_date,end_date,visibility,created_by,users(name)")
+            .select("id,title,destination,start_date,end_date,visibility,created_by,users!trips_created_by_fkey(name)")
             .eq("visibility", "public")
             .order("created_at", desc=True)
             .execute()
