@@ -15,6 +15,8 @@ from .db import close_db, get_supabase, init_db
 
 SECTORS = ["stay", "flight", "attraction"]
 ASSIGNABLE_ROLES = ["member", "observer"]
+VISIBILITY_LEVELS = ["private", "friends", "public"]
+TRIP_VISIBILITIES = ["private", "public"]
 DATE_FORMAT = "%d/%m/%Y"
 
 logger = logging.getLogger(__name__)
@@ -94,6 +96,18 @@ def linkify_compact(value):
     escaped = escape(text)
     linked = url_pattern.sub(lambda m: _repl(m), str(escaped))
     return Markup(linked)
+
+
+
+
+def can_view_value(level, is_friend=False, is_self=False):
+    if is_self:
+        return True
+    if level == "public":
+        return True
+    if level == "friends" and is_friend:
+        return True
+    return False
 
 
 def send_signup_invite_email(invited_email, inviter_name, trip_title):
@@ -238,10 +252,22 @@ def create_app():
     def ensure_member(trip_id, user_id):
         return get_trip_role(trip_id, user_id) is not None
 
+    def get_friend_ids(user_id):
+        supabase = get_supabase()
+        rows = supabase.table("friendships").select("friend_id").eq("user_id", user_id).execute().data
+        return {row["friend_id"] for row in rows}
+
+    def ensure_profile(user_id):
+        supabase = get_supabase()
+        existing = supabase.table("profiles").select("user_id").eq("user_id", user_id).limit(1).execute().data
+        if not existing:
+            supabase.table("profiles").insert({"user_id": user_id}).execute()
+
+
     @app.route("/")
     def landing():
         if session.get("user_id"):
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("feed"))
         return render_template("landing.html")
 
     @app.route("/register", methods=["GET", "POST"])
@@ -289,6 +315,7 @@ def create_app():
                 ).execute()
                 supabase.table("pending_invites").update({"status": "converted"}).eq("id", invite["id"]).execute()
 
+            ensure_profile(new_user["id"])
             flash("Account created! Please log in.", "success")
             return redirect(url_for("login"))
 
@@ -309,8 +336,9 @@ def create_app():
             session.clear()
             session["user_id"] = user["id"]
             session["user_name"] = user["name"]
+            ensure_profile(user["id"])
             flash(f"Welcome back, {user['name']}!", "success")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("feed"))
         return render_template("login.html")
 
     @app.route("/logout")
@@ -318,6 +346,55 @@ def create_app():
         session.clear()
         flash("You have been logged out.", "info")
         return redirect(url_for("landing"))
+
+
+    @app.route("/feed")
+    @login_required
+    def feed():
+        user_id = session["user_id"]
+        supabase = get_supabase()
+        friend_ids = get_friend_ids(user_id)
+
+        public_trips = (
+            supabase.table("trips")
+            .select("id,title,destination,start_date,end_date,visibility,created_by,users(name)")
+            .eq("visibility", "public")
+            .order("created_at", desc=True)
+            .execute()
+            .data
+        )
+
+        member_rows = supabase.table("trip_members").select("trip_id").eq("user_id", user_id).execute().data
+        member_trip_ids = {r["trip_id"] for r in member_rows}
+
+        pending_join_rows = (
+            supabase.table("join_requests")
+            .select("trip_id")
+            .eq("requester_id", user_id)
+            .eq("status", "pending")
+            .execute()
+            .data
+        )
+        pending_join_ids = {r["trip_id"] for r in pending_join_rows}
+
+        def trip_priority(t):
+            is_friend_trip = t.get("created_by") in friend_ids
+            return (0 if is_friend_trip else 1, )
+
+        normalized = []
+        for trip in public_trips:
+            creator = relation_to_object(trip.get("users"))
+            trip["creator_name"] = creator.get("name", "Unknown")
+            trip["start_date_display"] = format_date_display(trip.get("start_date"))
+            trip["end_date_display"] = format_date_display(trip.get("end_date"))
+            trip["visibility"] = trip.get("visibility", "private")
+            trip["is_friend_trip"] = trip.get("created_by") in friend_ids
+            trip["is_member"] = trip["id"] in member_trip_ids
+            trip["join_pending"] = trip["id"] in pending_join_ids
+            normalized.append(trip)
+
+        normalized.sort(key=trip_priority)
+        return render_template("feed.html", trips=normalized)
 
     @app.route("/dashboard")
     @login_required
@@ -332,7 +409,7 @@ def create_app():
         if trip_ids:
             trips = (
                 supabase.table("trips")
-                .select("id,title,destination,start_date,end_date,created_at")
+                .select("id,title,destination,start_date,end_date,visibility,created_at")
                 .in_("id", trip_ids)
                 .order("start_date")
                 .execute()
@@ -343,6 +420,7 @@ def create_app():
         for trip in trips:
             trip["start_date_display"] = format_date_display(trip.get("start_date"))
             trip["end_date_display"] = format_date_display(trip.get("end_date"))
+            trip["visibility"] = trip.get("visibility", "private")
 
         by_sector = defaultdict(list)
         for booking in bookings:
@@ -378,7 +456,7 @@ def create_app():
         supabase = get_supabase()
         notification = _first(
             supabase.table("notifications")
-            .select("id,trip_id,status,invite_role")
+            .select("id,trip_id,status,invite_role,type,friend_request_id,join_request_id")
             .eq("id", notification_id)
             .eq("user_id", user_id)
             .limit(1)
@@ -389,17 +467,43 @@ def create_app():
             flash("Notification is no longer actionable.", "warning")
             return redirect(url_for("dashboard"))
 
-        if action == "accept":
-            supabase.table("trip_members").upsert(
-                {"trip_id": notification["trip_id"], "user_id": user_id, "role": notification.get("invite_role") or "member"},
-                on_conflict="trip_id,user_id",
-            ).execute()
-
+        ntype = notification.get("type")
+        if ntype == "trip_invite":
+            if action == "accept":
+                supabase.table("trip_members").upsert(
+                    {"trip_id": notification["trip_id"], "user_id": user_id, "role": notification.get("invite_role") or "member"},
+                    on_conflict="trip_id,user_id",
+                ).execute()
+        elif ntype == "friend_request":
+            req_id = notification.get("friend_request_id")
+            req = _first(supabase.table("friend_requests").select("requester_id,addressee_id,status").eq("id", req_id).limit(1).execute().data)
+            if req and req.get("status") == "pending":
+                supabase.table("friend_requests").update(
+                    {"status": "accepted" if action == "accept" else "rejected", "responded_at": datetime.utcnow().isoformat()}
+                ).eq("id", req_id).execute()
+                if action == "accept":
+                    supabase.table("friendships").upsert(
+                        [{"user_id": req["requester_id"], "friend_id": req["addressee_id"]}, {"user_id": req["addressee_id"], "friend_id": req["requester_id"]}],
+                        on_conflict="user_id,friend_id",
+                    ).execute()
+        elif ntype == "join_request":
+            join_id = notification.get("join_request_id")
+            jreq = _first(supabase.table("join_requests").select("trip_id,requester_id,status").eq("id", join_id).limit(1).execute().data)
+            if jreq and jreq.get("status") == "pending":
+                supabase.table("join_requests").update(
+                    {"status": "approved" if action == "accept" else "rejected", "responded_at": datetime.utcnow().isoformat()}
+                ).eq("id", join_id).execute()
+                if action == "accept":
+                    supabase.table("trip_members").upsert(
+                        {"trip_id": jreq["trip_id"], "user_id": jreq["requester_id"], "role": "observer"},
+                        on_conflict="trip_id,user_id",
+                    ).execute()
+        
         supabase.table("notifications").update(
             {"status": "accepted" if action == "accept" else "denied", "responded_at": datetime.utcnow().isoformat()}
         ).eq("id", notification_id).execute()
 
-        flash("Invitation accepted." if action == "accept" else "Invitation denied.", "success")
+        flash("Request accepted." if action == "accept" else "Request denied.", "success")
         return redirect(url_for("dashboard"))
 
     @app.route("/trips/new", methods=["POST"])
@@ -409,6 +513,7 @@ def create_app():
         destination = request.form.get("destination", "").strip()
         start_date_raw = request.form.get("start_date", "").strip()
         end_date_raw = request.form.get("end_date", "").strip()
+        visibility = request.form.get("visibility", "private").strip().lower()
         start_date = parse_date_input(start_date_raw)
         end_date = parse_date_input(end_date_raw)
 
@@ -421,11 +526,14 @@ def create_app():
         if end_date_raw and not end_date:
             flash("Use dd/mm/yyyy format for trip end date.", "danger")
             return redirect(url_for("dashboard"))
+        if visibility not in TRIP_VISIBILITIES:
+            flash("Invalid trip visibility.", "danger")
+            return redirect(url_for("dashboard"))
 
         supabase = get_supabase()
         trip = _first(
             supabase.table("trips")
-            .insert({"title": title, "destination": destination, "start_date": start_date, "end_date": end_date, "created_by": session["user_id"]})
+            .insert({"title": title, "destination": destination, "start_date": start_date, "end_date": end_date, "visibility": visibility, "created_by": session["user_id"]})
             .execute()
             .data
         )
@@ -452,7 +560,7 @@ def create_app():
         supabase = get_supabase()
         trip = _first(
             supabase.table("trips")
-            .select("id,title,destination,start_date,end_date")
+            .select("id,title,destination,start_date,end_date,visibility")
             .eq("id", trip_id)
             .limit(1)
             .execute()
@@ -463,6 +571,7 @@ def create_app():
             return redirect(url_for("dashboard"))
         trip["start_date_display"] = format_date_display(trip.get("start_date"))
         trip["end_date_display"] = format_date_display(trip.get("end_date"))
+        trip["visibility"] = trip.get("visibility", "private")
 
         member_rows = (
             supabase.table("trip_members")
@@ -750,5 +859,139 @@ def create_app():
         supabase.table("trip_members").delete().eq("trip_id", trip_id).eq("user_id", session["user_id"]).execute()
         flash("You left the trip.", "info")
         return redirect(url_for("dashboard"))
+
+
+    @app.route("/friends/request", methods=["POST"])
+    @login_required
+    def send_friend_request():
+        email = request.form.get("email", "").strip().lower()
+        supabase = get_supabase()
+        target = _first(supabase.table("users").select("id,name").eq("email", email).limit(1).execute().data)
+        if not target:
+            flash("User not found.", "danger")
+            return redirect(url_for("feed"))
+        if target["id"] == session["user_id"]:
+            flash("You cannot friend yourself.", "warning")
+            return redirect(url_for("feed"))
+
+        friend_ids = get_friend_ids(session["user_id"])
+        if target["id"] in friend_ids:
+            flash("Already friends.", "info")
+            return redirect(url_for("feed"))
+
+        req = _first(
+            supabase.table("friend_requests")
+            .upsert(
+                {"requester_id": session["user_id"], "addressee_id": target["id"], "status": "pending"},
+                on_conflict="requester_id,addressee_id",
+            )
+            .execute()
+            .data
+        )
+
+        if req:
+            supabase.table("notifications").insert(
+                {
+                    "user_id": target["id"],
+                    "type": "friend_request",
+                    "message": f"{session.get('user_name', 'Someone')} sent you a friend request.",
+                    "status": "pending",
+                    "friend_request_id": req["id"],
+                }
+            ).execute()
+
+        flash("Friend request sent.", "success")
+        return redirect(url_for("feed"))
+
+    @app.route("/trips/<int:trip_id>/join-public", methods=["POST"])
+    @login_required
+    def join_public_trip(trip_id):
+        supabase = get_supabase()
+        trip = _first(supabase.table("trips").select("id,visibility").eq("id", trip_id).limit(1).execute().data)
+        if not trip or trip.get("visibility") != "public":
+            flash("Trip is not public.", "warning")
+            return redirect(url_for("feed"))
+
+        supabase.table("trip_members").upsert(
+            {"trip_id": trip_id, "user_id": session["user_id"], "role": "observer"},
+            on_conflict="trip_id,user_id",
+        ).execute()
+        flash("Joined trip as observer.", "success")
+        return redirect(url_for("trip_details", trip_id=trip_id))
+
+    @app.route("/trips/<int:trip_id>/request-access", methods=["POST"])
+    @login_required
+    def request_private_trip_access(trip_id):
+        supabase = get_supabase()
+        trip = _first(supabase.table("trips").select("id,title,visibility,created_by").eq("id", trip_id).limit(1).execute().data)
+        if not trip:
+            flash("Trip not found.", "danger")
+            return redirect(url_for("feed"))
+        if trip.get("visibility") == "public":
+            return redirect(url_for("join_public_trip", trip_id=trip_id))
+
+        req = _first(
+            supabase.table("join_requests")
+            .upsert(
+                {"trip_id": trip_id, "requester_id": session["user_id"], "status": "pending"},
+                on_conflict="trip_id,requester_id",
+            )
+            .execute()
+            .data
+        )
+        if req:
+            supabase.table("notifications").insert(
+                {
+                    "user_id": trip["created_by"],
+                    "trip_id": trip_id,
+                    "type": "join_request",
+                    "message": f"{session.get('user_name', 'Someone')} requested to join trip '{trip.get('title', '')}'.",
+                    "status": "pending",
+                    "join_request_id": req["id"],
+                }
+            ).execute()
+
+        flash("Access request sent to owner.", "success")
+        return redirect(url_for("feed"))
+
+    @app.route("/profile", methods=["GET", "POST"])
+    @login_required
+    def profile():
+        user_id = session["user_id"]
+        ensure_profile(user_id)
+        supabase = get_supabase()
+
+        if request.method == "POST":
+            bio = request.form.get("bio", "").strip() or None
+            name_visibility = request.form.get("name_visibility", "friends").strip().lower()
+            email_visibility = request.form.get("email_visibility", "private").strip().lower()
+            bio_visibility = request.form.get("bio_visibility", "friends").strip().lower()
+            if name_visibility not in VISIBILITY_LEVELS or email_visibility not in VISIBILITY_LEVELS or bio_visibility not in VISIBILITY_LEVELS:
+                flash("Invalid visibility selection.", "danger")
+                return redirect(url_for("profile"))
+
+            supabase.table("profiles").update(
+                {
+                    "bio": bio,
+                    "name_visibility": name_visibility,
+                    "email_visibility": email_visibility,
+                    "bio_visibility": bio_visibility,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            ).eq("user_id", user_id).execute()
+            flash("Profile updated.", "success")
+            return redirect(url_for("profile"))
+
+        user = _first(supabase.table("users").select("id,name,email").eq("id", user_id).limit(1).execute().data) or {}
+        profile_row = _first(supabase.table("profiles").select("*").eq("user_id", user_id).limit(1).execute().data) or {}
+        friends = supabase.table("friendships").select("friend_id,users!friendships_friend_id_fkey(name,email)").eq("user_id", user_id).execute().data
+
+        return render_template(
+            "profile.html",
+            user=user,
+            profile_data=profile_row,
+            visibility_levels=VISIBILITY_LEVELS,
+            friends=friends,
+        )
 
     return app

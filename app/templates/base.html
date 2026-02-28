@@ -9,7 +9,7 @@
   </head>
   <body>
     <header class="topbar">
-      <a class="logo-fab" href="{{ url_for('dashboard') }}" aria-label="Go to dashboard">✈</a>
+      <a class="logo-fab" href="{{ url_for('feed') }}" aria-label="Go to feed">✈</a>
 
       <nav class="top-icons">
         {% if session.get('user_id') %}
@@ -19,7 +19,7 @@
               <span class="notif-dot" aria-hidden="true"></span>
             {% endif %}
           </a>
-          <a class="icon-btn" href="{{ url_for('dashboard') }}" aria-label="Profile">👤</a>
+          <a class="icon-btn" href="{{ url_for('profile') }}" aria-label="Profile">👤</a>
           <a class="pill-link" href="{{ url_for('logout') }}">Logout</a>
         {% else %}
           <a class="pill-link" href="{{ url_for('login') }}">Login</a>

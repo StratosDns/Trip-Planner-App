@@ -10,6 +10,12 @@
       <label>Destination <input type="text" name="destination" required /></label>
       <label>Start date (dd/mm/yyyy) <input type="text" name="start_date" placeholder="dd/mm/yyyy" /></label>
       <label>End date (dd/mm/yyyy) <input type="text" name="end_date" placeholder="dd/mm/yyyy" /></label>
+      <label>Visibility
+        <select name="visibility">
+          <option value="private" selected>Private</option>
+          <option value="public">Public</option>
+        </select>
+      </label>
       <button type="submit">Create trip</button>
     </form>
   </article>
@@ -22,7 +28,7 @@
           <li>
             <a href="{{ url_for('trip_details', trip_id=trip['id']) }}">{{ trip['title'] }}</a>
             — {{ trip['destination'] }}
-            <span class="muted">({{ trip['start_date_display'] }} to {{ trip['end_date_display'] }})</span>
+            <span class="muted">({{ trip['start_date_display'] }} to {{ trip['end_date_display'] }}) · {{ trip['visibility']|capitalize }}</span>
           </li>
         {% endfor %}
       </ul>
