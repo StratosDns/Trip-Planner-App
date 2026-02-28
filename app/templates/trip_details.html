@@ -32,7 +32,7 @@
     <ul>
       {% for member in members %}
         <li>
-          {{ member['name'] }} ({{ member['email'] }}) - {{ member['role'] }}
+          {{ member['name'] }} ({{ member['email'] }}) - {{ member['role']|capitalize }}
           {% if can_manage_roles and member['role'] != 'owner' %}
             <form method="post" action="{{ url_for('update_member_role', trip_id=trip['id'], member_user_id=member['user_id']) }}" class="inline-role-form">
               <select name="role">
@@ -53,7 +53,7 @@
           <select name="new_owner_user_id" required>
             <option value="">Select participant</option>
             {% for candidate in owner_candidates %}
-              <option value="{{ candidate['user_id'] }}">{{ candidate['name'] }} ({{ candidate['role'] }})</option>
+              <option value="{{ candidate['user_id'] }}">{{ candidate['name'] }} ({{ candidate['role']|capitalize }})</option>
             {% endfor %}
           </select>
         </label>
@@ -119,7 +119,7 @@
           {% for booking in bookings %}
             {% set fields = booking.get('custom_fields') or {} %}
             <tr>
-              <td>{{ booking['sector'] }}</td>
+              <td>{{ booking['sector']|capitalize }}</td>
               <td>{{ booking['title']|linkify_compact if can_open_links else booking['title']|mask_links }}</td>
               <td>{{ (booking['provider'] or '-')|linkify_compact if can_open_links else (booking['provider'] or '-')|mask_links }}</td>
               {% if can_view_confirmation_code %}<td>{{ (booking['confirmation_code'] or '-')|linkify_compact if can_open_links else (booking['confirmation_code'] or '-')|mask_links }}</td>{% endif %}

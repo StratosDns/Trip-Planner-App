@@ -8,10 +8,16 @@
     <label>Name <input type="text" name="name" value="{{ prefill_name or '' }}" required /></label>
     <label>Email <input type="email" name="email" value="{{ prefill_email or '' }}" required /></label>
     <label>Password <input type="password" name="password" required /></label>
-    <p class="muted">
-      Password requirements: minimum 8 characters, at least 1 uppercase letter, 1 number, and 1 symbol.
-      Allowed symbols: <code>{{ password_symbols }}</code>
-    </p>
+    <div class="muted">
+      <p>Password requirements:</p>
+      <ul>
+        <li>At least 8 characters</li>
+        <li>At least 1 uppercase letter</li>
+        <li>At least 1 lowercase letter</li>
+        <li>At least 1 number</li>
+        <li>At least 1 symbol from: <code>{{ password_symbols }}</code></li>
+      </ul>
+    </div>
     <button type="submit">Send verification code</button>
   </form>
 {% else %}
