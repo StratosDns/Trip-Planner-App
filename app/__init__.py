@@ -1,9 +1,11 @@
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.message import EmailMessage
+import hmac
 import logging
 import os
 import re
+import secrets
 import smtplib
 
 from flask import Flask, render_template, request, redirect, url_for, flash, session
@@ -18,6 +20,7 @@ ASSIGNABLE_ROLES = ["member", "observer"]
 VISIBILITY_LEVELS = ["private", "friends", "public"]
 TRIP_VISIBILITIES = ["private", "public"]
 DATE_FORMAT = "%d/%m/%Y"
+PASSWORD_SYMBOLS = "!@#$%^&*()-_=+[]{};:,.?/"
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +113,20 @@ def can_view_value(level, is_friend=False, is_self=False):
     return False
 
 
+def validate_password_strength(password):
+    errors = []
+    if len(password) < 8:
+        errors.append("Password must be at least 8 characters long.")
+    if not re.search(r"[A-Z]", password):
+        errors.append("Password must include at least one uppercase letter.")
+    if not re.search(r"[0-9]", password):
+        errors.append("Password must include at least one number.")
+    symbol_pattern = "[" + re.escape(PASSWORD_SYMBOLS) + "]"
+    if not re.search(symbol_pattern, password):
+        errors.append(f"Password must include at least one symbol: {PASSWORD_SYMBOLS}")
+    return errors
+
+
 def send_signup_invite_email(invited_email, inviter_name, trip_title):
     smtp_host = os.getenv("SMTP_HOST")
     smtp_port_raw = os.getenv("SMTP_PORT", "587")
@@ -148,6 +165,44 @@ def send_signup_invite_email(invited_email, inviter_name, trip_title):
         return True
     except Exception:
         logger.exception("Failed to send signup invite email to %s", invited_email)
+        return False
+
+
+def send_verification_email(target_email, verification_code):
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port_raw = os.getenv("SMTP_PORT", "587")
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    smtp_from = os.getenv("SMTP_FROM") or smtp_user
+
+    if not (smtp_host and smtp_user and smtp_password and smtp_from):
+        logger.warning("SMTP not fully configured; cannot send verification email")
+        return False
+
+    try:
+        smtp_port = int(smtp_port_raw)
+    except ValueError:
+        logger.exception("SMTP_PORT is invalid: %s", smtp_port_raw)
+        return False
+
+    msg = EmailMessage()
+    msg["Subject"] = "Trip Planner verification code"
+    msg["From"] = smtp_from
+    msg["To"] = target_email
+    msg.set_content(
+        "Use this verification code to finish creating your account:\n\n"
+        f"{verification_code}\n\n"
+        "This code expires in 10 minutes."
+    )
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception:
+        logger.exception("Failed to send verification email to %s", target_email)
         return False
 
 
@@ -338,14 +393,8 @@ def create_app():
     @app.route("/register", methods=["GET", "POST"])
     def register():
         prefill_email = request.args.get("email", "").strip().lower()
-        if request.method == "POST":
-            name = request.form.get("name", "").strip()
-            email = request.form.get("email", "").strip().lower()
-            password = request.form.get("password", "")
-            if not name or not email or not password:
-                flash("All fields are required.", "danger")
-                return redirect(url_for("register", email=email))
 
+        def finalize_user_registration(name, email, password_hash):
             supabase = get_supabase()
             existing = supabase.table("users").select("id").eq("email", email).limit(1).execute().data
             if existing:
@@ -354,7 +403,7 @@ def create_app():
 
             new_user = _first(
                 supabase.table("users")
-                .insert({"name": name, "email": email, "password_hash": generate_password_hash(password)})
+                .insert({"name": name, "email": email, "password_hash": password_hash})
                 .execute()
                 .data
             )
@@ -391,10 +440,106 @@ def create_app():
                 supabase.table("pending_invites").update({"status": "converted"}).eq("id", invite["id"]).execute()
 
             ensure_profile(new_user["id"])
+            session.pop("pending_registration", None)
             flash("Account created! Please log in.", "success")
             return redirect(url_for("login"))
 
-        return render_template("register.html", prefill_email=prefill_email)
+        pending_registration = session.get("pending_registration")
+
+        if request.method == "POST":
+            action = request.form.get("action", "start")
+
+            if action == "verify":
+                verification_code = request.form.get("verification_code", "").strip()
+                pending_registration = session.get("pending_registration")
+                if not pending_registration:
+                    flash("Verification session expired. Please register again.", "warning")
+                    return redirect(url_for("register", email=prefill_email))
+
+                expires_at = pending_registration.get("expires_at")
+                expires_dt = datetime.fromisoformat(expires_at) if expires_at else datetime.utcnow()
+                if datetime.utcnow() > expires_dt:
+                    session.pop("pending_registration", None)
+                    flash("Verification code expired. Please register again.", "warning")
+                    return redirect(url_for("register", email=pending_registration.get("email", "")))
+
+                expected_code = pending_registration.get("verification_code", "")
+                if not hmac.compare_digest(verification_code, expected_code):
+                    flash("Invalid verification code.", "danger")
+                    return render_template(
+                        "register.html",
+                        prefill_email=pending_registration.get("email", ""),
+                        prefill_name=pending_registration.get("name", ""),
+                        requires_verification=True,
+                        password_symbols=PASSWORD_SYMBOLS,
+                    )
+
+                return finalize_user_registration(
+                    pending_registration.get("name", ""),
+                    pending_registration.get("email", ""),
+                    pending_registration.get("password_hash", ""),
+                )
+
+            name = request.form.get("name", "").strip()
+            email = request.form.get("email", "").strip().lower()
+            password = request.form.get("password", "")
+            if not name or not email or not password:
+                flash("All fields are required.", "danger")
+                return redirect(url_for("register", email=email))
+
+            password_errors = validate_password_strength(password)
+            if password_errors:
+                for err in password_errors:
+                    flash(err, "danger")
+                return render_template(
+                    "register.html",
+                    prefill_email=email,
+                    prefill_name=name,
+                    requires_verification=False,
+                    password_symbols=PASSWORD_SYMBOLS,
+                )
+
+            supabase = get_supabase()
+            existing = supabase.table("users").select("id").eq("email", email).limit(1).execute().data
+            if existing:
+                flash("User with this email already exists.", "danger")
+                return redirect(url_for("register", email=email))
+
+            verification_code = f"{secrets.randbelow(1000000):06d}"
+            if not send_verification_email(email, verification_code):
+                flash("Could not send verification email. Please try again later.", "danger")
+                return render_template(
+                    "register.html",
+                    prefill_email=email,
+                    prefill_name=name,
+                    requires_verification=False,
+                    password_symbols=PASSWORD_SYMBOLS,
+                )
+
+            session["pending_registration"] = {
+                "name": name,
+                "email": email,
+                "password_hash": generate_password_hash(password),
+                "verification_code": verification_code,
+                "expires_at": (datetime.utcnow() + timedelta(minutes=10)).isoformat(),
+            }
+            flash("Verification code sent to your email. Enter it below to finish registration.", "info")
+            return render_template(
+                "register.html",
+                prefill_email=email,
+                prefill_name=name,
+                requires_verification=True,
+                password_symbols=PASSWORD_SYMBOLS,
+            )
+
+        requires_verification = bool(pending_registration)
+        return render_template(
+            "register.html",
+            prefill_email=(pending_registration or {}).get("email", prefill_email),
+            prefill_name=(pending_registration or {}).get("name", ""),
+            requires_verification=requires_verification,
+            password_symbols=PASSWORD_SYMBOLS,
+        )
 
     @app.route("/login", methods=["GET", "POST"])
     def login():

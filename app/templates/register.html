@@ -1,10 +1,25 @@
 {% extends 'base.html' %}
 {% block content %}
 <h2>Register</h2>
-<form method="post" class="card form-grid">
-  <label>Name <input type="text" name="name" required /></label>
-  <label>Email <input type="email" name="email" value="{{ prefill_email or '' }}" required /></label>
-  <label>Password <input type="password" name="password" required /></label>
-  <button type="submit">Create account</button>
-</form>
+
+{% if not requires_verification %}
+  <form method="post" class="card form-grid">
+    <input type="hidden" name="action" value="start" />
+    <label>Name <input type="text" name="name" value="{{ prefill_name or '' }}" required /></label>
+    <label>Email <input type="email" name="email" value="{{ prefill_email or '' }}" required /></label>
+    <label>Password <input type="password" name="password" required /></label>
+    <p class="muted">
+      Password requirements: minimum 8 characters, at least 1 uppercase letter, 1 number, and 1 symbol.
+      Allowed symbols: <code>{{ password_symbols }}</code>
+    </p>
+    <button type="submit">Send verification code</button>
+  </form>
+{% else %}
+  <form method="post" class="card form-grid">
+    <input type="hidden" name="action" value="verify" />
+    <p>We sent a 6-digit verification code to <strong>{{ prefill_email }}</strong>.</p>
+    <label>Verification code <input type="text" name="verification_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required /></label>
+    <button type="submit">Verify and create account</button>
+  </form>
+{% endif %}
 {% endblock %}
