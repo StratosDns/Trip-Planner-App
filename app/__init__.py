@@ -680,6 +680,11 @@ def create_app():
 
         custom_field_columns = sorted(custom_field_keys)
         current_user_role = get_trip_role(trip_id, session["user_id"])
+        can_view_confirmation_code = current_user_role in {"owner", "member"}
+        if not can_view_confirmation_code:
+            for booking in bookings:
+                booking["confirmation_code"] = None
+
         owner_candidates = [
             m for m in members if m.get("user_id") != session["user_id"] and m.get("role") != "owner"
         ]
@@ -695,6 +700,7 @@ def create_app():
             can_manage_roles=current_user_role == "owner",
             can_edit_bookings=current_user_role in {"owner", "member"},
             can_open_links=current_user_role != "observer",
+            can_view_confirmation_code=can_view_confirmation_code,
             assignable_roles=ASSIGNABLE_ROLES,
             current_user_id=session["user_id"],
             owner_candidates=owner_candidates,

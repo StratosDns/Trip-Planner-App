@@ -105,7 +105,7 @@
             <th>Sector</th>
             <th>Title</th>
             <th>Provider</th>
-            <th>Code</th>
+            {% if can_view_confirmation_code %}<th>Code</th>{% endif %}
             <th>Start</th>
             <th>End</th>
             {% for field_key in custom_field_columns %}
@@ -122,7 +122,7 @@
               <td>{{ booking['sector'] }}</td>
               <td>{{ booking['title']|linkify_compact if can_open_links else booking['title']|mask_links }}</td>
               <td>{{ (booking['provider'] or '-')|linkify_compact if can_open_links else (booking['provider'] or '-')|mask_links }}</td>
-              <td>{{ (booking['confirmation_code'] or '-')|linkify_compact if can_open_links else (booking['confirmation_code'] or '-')|mask_links }}</td>
+              {% if can_view_confirmation_code %}<td>{{ (booking['confirmation_code'] or '-')|linkify_compact if can_open_links else (booking['confirmation_code'] or '-')|mask_links }}</td>{% endif %}
               <td>{{ booking['start_date_display'] }}</td>
               <td>{{ booking['end_date_display'] }}</td>
               {% for field_key in custom_field_columns %}
