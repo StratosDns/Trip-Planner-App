@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{{ session.get('user_name') }}'s Trips</h2>
+
+<section class="grid-two">
+  <article class="card">
+    <h3>Create a New Trip</h3>
+    <form method="post" action="{{ url_for('create_trip') }}" class="form-grid">
+      <label>Trip title <input type="text" name="title" required /></label>
+      <label>Destination <input type="text" name="destination" required /></label>
+      <label>Start date (dd/mm/yyyy) <input type="text" name="start_date" placeholder="dd/mm/yyyy" /></label>
+      <label>End date (dd/mm/yyyy) <input type="text" name="end_date" placeholder="dd/mm/yyyy" /></label>
+      <label>Visibility
+        <select name="visibility">
+          <option value="private" selected>Private</option>
+          <option value="public">Public</option>
+        </select>
+      </label>
+      <button type="submit">Create trip</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h3>Your Trips</h3>
+    {% if trips %}
+      <ul>
+        {% for trip in trips %}
+          <li class="trip-row">
+            <div>
+              <a href="{{ url_for('trip_details', trip_id=trip['id']) }}"><strong>{{ trip['title'] }}</strong></a>
+              — {{ trip['destination'] }}
+              <span class="muted">({{ trip['start_date_display'] }} to {{ trip['end_date_display'] }})</span>
+            </div>
+            <div class="actions-inline">
+              <span class="muted">{{ trip['visibility']|capitalize }}</span>
+              {% if trip['current_user_role'] == 'owner' %}
+                <form method="post" action="{{ url_for('update_trip_visibility', trip_id=trip['id']) }}">
+                  <input type="hidden" name="visibility" value="{{ 'public' if trip['visibility'] == 'private' else 'private' }}" />
+                  <button type="submit" class="button secondary">
+                    Make {{ 'Public' if trip['visibility'] == 'private' else 'Private' }}
+                  </button>
+                </form>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No trips yet.</p>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}
