@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Community Feed</h2>
+<p class="muted">Public trips are visible to everyone. Trips from your friends appear first.</p>
+
+<section class="card">
+  <h3>Add a friend</h3>
+  <form method="post" action="{{ url_for('send_friend_request') }}" class="form-grid">
+    <label>Friend email <input type="email" name="email" required /></label>
+    <button type="submit">Send friend request</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Public Trips</h3>
+  {% if trips %}
+    <ul>
+      {% for trip in trips %}
+        <li class="feed-trip-item">
+          <div>
+            <strong>{{ trip['title'] }}</strong> — {{ trip['destination'] }}
+            {% if trip['is_friend_trip'] %}<span class="friend-pill">Friend</span>{% endif %}
+            <div class="muted">By {{ trip['creator_name'] }} · {{ trip['start_date_display'] }} to {{ trip['end_date_display'] }}</div>
+          </div>
+          <div class="actions-inline">
+            {% if trip['is_member'] %}
+              <a class="button" href="{{ url_for('trip_details', trip_id=trip['id']) }}">View</a>
+            {% elif trip['visibility'] == 'public' %}
+              <form method="post" action="{{ url_for('join_public_trip', trip_id=trip['id']) }}">
+                <button type="submit">Join as Observer</button>
+              </form>
+            {% elif trip['join_pending'] %}
+              <span class="muted">Request pending</span>
+            {% else %}
+              <form method="post" action="{{ url_for('request_private_trip_access', trip_id=trip['id']) }}">
+                <button type="submit">Request access</button>
+              </form>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No Public trips yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

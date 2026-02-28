@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="hero colorful">
+  <h2>Trip Planner</h2>
+  <p>
+    One vibrant place for your flights, stays, activities, and group plans.
+    Invite friends, manage bookings, and keep everything synced.
+  </p>
+  <div class="actions">
+    <a class="button" href="{{ url_for('register') }}">Create account</a>
+    <a class="button secondary" href="{{ url_for('login') }}">Login</a>
+  </div>
+</section>
+{% endblock %}

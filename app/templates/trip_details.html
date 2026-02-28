@@ -1,0 +1,191 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{{ trip['title'] }} — {{ trip['destination'] }}</h2>
+<p>{{ trip['start_date_display'] }} to {{ trip['end_date_display'] }}</p>
+<p class="muted">Your role: <strong>{{ current_user_role|capitalize }}</strong></p>
+
+<section class="grid-two">
+  <article class="card">
+    <h3>Invite Participant</h3>
+    {% if can_manage_roles %}
+      <form method="post" action="{{ url_for('invite_member', trip_id=trip['id']) }}" class="form-grid">
+        <label>User email <input type="email" name="email" required /></label>
+        <label>Role
+          <select name="invite_role" required>
+            {% for role in assignable_roles %}
+              <option value="{{ role }}">{{ role|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Invite</button>
+      </form>
+    {% else %}
+      <p class="muted">Only owner can invite and assign participant roles.</p>
+    {% endif %}
+
+    <p class="muted">
+      Registered users receive an in-app notification to accept/deny.
+      Unregistered users receive a signup email, and their invite appears in notifications after signup.
+    </p>
+
+    <h4>Participants</h4>
+    <ul>
+      {% for member in members %}
+        <li>
+          {{ member['name'] }} ({{ member['email'] }}) - {{ member['role']|capitalize }}
+          {% if can_manage_roles and member['role'] != 'owner' %}
+            <form method="post" action="{{ url_for('update_member_role', trip_id=trip['id'], member_user_id=member['user_id']) }}" class="inline-role-form">
+              <select name="role">
+                {% for role in assignable_roles %}
+                  <option value="{{ role }}" {% if member['role'] == role %}selected{% endif %}>{{ role|capitalize }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit">Save</button>
+            </form>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+
+    {% if current_user_role == 'owner' %}
+      <form method="post" action="{{ url_for('leave_trip', trip_id=trip['id']) }}" class="form-grid">
+        <label>Assign new owner before leaving
+          <select name="new_owner_user_id" required>
+            <option value="">Select participant</option>
+            {% for candidate in owner_candidates %}
+              <option value="{{ candidate['user_id'] }}">{{ candidate['name'] }} ({{ candidate['role']|capitalize }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" class="button secondary">Transfer ownership & leave</button>
+      </form>
+    {% else %}
+      <form method="post" action="{{ url_for('leave_trip', trip_id=trip['id']) }}">
+        <button type="submit" class="button secondary">Leave trip</button>
+      </form>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <h3>Add Booking</h3>
+    {% if can_edit_bookings %}
+      <form method="post" action="{{ url_for('add_booking', trip_id=trip['id']) }}" class="form-grid">
+        <label>Sector
+          <select name="sector" required>
+            <option value="">Select one</option>
+            {% for sector in sectors %}
+              <option value="{{ sector }}">{{ sector|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Title <input type="text" name="title" required /></label>
+        <label>Provider <input type="text" name="provider" /></label>
+        <label>Confirmation code <input type="text" name="confirmation_code" /></label>
+        <label>Start date (dd/mm/yyyy) <input type="text" name="start_date" placeholder="dd/mm/yyyy" required /></label>
+        <label>End date (dd/mm/yyyy, optional) <input type="text" name="end_date" placeholder="dd/mm/yyyy" /></label>
+        <label>Custom fields (one per line, key:value)
+          <textarea name="custom_fields" rows="3" placeholder="seat: 14A&#10;meal: vegetarian"></textarea>
+        </label>
+        <label>Notes <textarea name="notes" rows="3"></textarea></label>
+        <button type="submit">Save booking</button>
+      </form>
+    {% else %}
+      <p class="muted">Observer role cannot add or edit bookings.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="card">
+  <h3>Trip Bookings</h3>
+  {% if bookings %}
+    <div class="table-wrap">
+      <table class="booking-table">
+        <thead>
+          <tr>
+            <th>Sector</th>
+            <th>Title</th>
+            <th>Provider</th>
+            {% if can_view_confirmation_code %}<th>Code</th>{% endif %}
+            <th>Start</th>
+            <th>End</th>
+            {% for field_key in custom_field_columns %}
+              <th>{{ field_key }}</th>
+            {% endfor %}
+            <th>Notes</th>
+            <th>Edit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for booking in bookings %}
+            {% set fields = booking.get('custom_fields') or {} %}
+            <tr>
+              <td>{{ booking['sector']|capitalize }}</td>
+              <td>{{ booking['title']|linkify_compact if can_open_links else booking['title']|mask_links }}</td>
+              <td>{{ (booking['provider'] or '-')|linkify_compact if can_open_links else (booking['provider'] or '-')|mask_links }}</td>
+              {% if can_view_confirmation_code %}<td>{{ (booking['confirmation_code'] or '-')|linkify_compact if can_open_links else (booking['confirmation_code'] or '-')|mask_links }}</td>{% endif %}
+              <td>{{ booking['start_date_display'] }}</td>
+              <td>{{ booking['end_date_display'] }}</td>
+              {% for field_key in custom_field_columns %}
+                {% set val = fields.get(field_key, '-') if fields is mapping else '-' %}
+                <td>{{ val|linkify_compact if can_open_links else val|mask_links }}</td>
+              {% endfor %}
+              <td>{{ (booking['notes'] or '-')|linkify_compact if can_open_links else (booking['notes'] or '-')|mask_links }}</td>
+              <td>
+                {% if can_edit_bookings %}
+                  <button type="button" class="button edit-pill" onclick="openEditModal('edit-modal-{{ booking['id'] }}')">Edit</button>
+                {% else %}
+                  <span class="muted">Read-only</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if can_edit_bookings %}
+      {% for booking in bookings %}
+        <dialog id="edit-modal-{{ booking['id'] }}" class="edit-modal">
+          <div class="modal-header">
+            <h4>Edit Booking</h4>
+            <button type="button" class="button secondary" onclick="closeEditModal('edit-modal-{{ booking['id'] }}')">Close</button>
+          </div>
+          <form method="post" action="{{ url_for('edit_booking', trip_id=trip['id'], booking_id=booking['id']) }}" class="form-grid modal-form">
+            <label>Sector
+              <select name="sector" required>
+                {% for sector in sectors %}
+                  <option value="{{ sector }}" {% if booking['sector'] == sector %}selected{% endif %}>{{ sector|capitalize }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Title <input type="text" name="title" value="{{ booking['title'] }}" required /></label>
+            <label>Provider <input type="text" name="provider" value="{{ booking['provider'] or '' }}" /></label>
+            <label>Confirmation code <input type="text" name="confirmation_code" value="{{ booking['confirmation_code'] or '' }}" /></label>
+            <label>Start (dd/mm/yyyy) <input type="text" name="start_date" value="{{ booking['start_date_display'] if booking['start_date_display'] != '-' else '' }}" required /></label>
+            <label>End (dd/mm/yyyy, optional) <input type="text" name="end_date" value="{{ booking['end_date_display'] if booking['end_date_display'] != '-' else '' }}" /></label>
+            <label>Custom fields
+              <textarea name="custom_fields" rows="3">{{ booking['custom_fields_text'] }}</textarea>
+            </label>
+            <label>Notes <textarea name="notes" rows="3">{{ booking['notes'] or '' }}</textarea></label>
+            <button type="submit">Update booking</button>
+          </form>
+        </dialog>
+      {% endfor %}
+    {% endif %}
+  {% else %}
+    <p>No bookings yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  function openEditModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) modal.showModal();
+  }
+
+  function closeEditModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) modal.close();
+  }
+</script>
+{% endblock %}
