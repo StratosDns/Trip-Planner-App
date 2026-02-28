@@ -238,30 +238,74 @@ def create_app():
 
     def get_trip_role(trip_id, user_id):
         supabase = get_supabase()
-        row = _first(
-            supabase.table("trip_members")
-            .select("role")
-            .eq("trip_id", trip_id)
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-            .data
-        )
-        return (row or {}).get("role")
+        try:
+            row = _first(
+                supabase.table("trip_members")
+                .select("role")
+                .eq("trip_id", trip_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+                .data
+            )
+            return (row or {}).get("role")
+        except Exception:
+            # Backward compatibility for databases missing trip_members.role.
+            row = _first(
+                supabase.table("trip_members")
+                .select("trip_id,user_id")
+                .eq("trip_id", trip_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if not row:
+                return None
+            trip = _first(supabase.table("trips").select("created_by").eq("id", trip_id).limit(1).execute().data) or {}
+            return "owner" if trip.get("created_by") == user_id else "member"
+
+    def upsert_trip_member(trip_id, user_id, role="member"):
+        supabase = get_supabase()
+        payload = {"trip_id": trip_id, "user_id": user_id, "role": role}
+        try:
+            supabase.table("trip_members").upsert(payload, on_conflict="trip_id,user_id").execute()
+            return
+        except Exception:
+            # Backward compatibility when role column is not available yet.
+            supabase.table("trip_members").upsert(
+                {"trip_id": trip_id, "user_id": user_id}, on_conflict="trip_id,user_id"
+            ).execute()
+
+    def insert_notification(payload):
+        supabase = get_supabase()
+        try:
+            supabase.table("notifications").insert(payload).execute()
+            return
+        except Exception:
+            fallback = {k: v for k, v in payload.items() if k not in {"invite_role", "friend_request_id", "join_request_id"}}
+            supabase.table("notifications").insert(fallback).execute()
 
     def ensure_member(trip_id, user_id):
         return get_trip_role(trip_id, user_id) is not None
 
     def get_friend_ids(user_id):
         supabase = get_supabase()
-        rows = supabase.table("friendships").select("friend_id").eq("user_id", user_id).execute().data
+        try:
+            rows = supabase.table("friendships").select("friend_id").eq("user_id", user_id).execute().data
+        except Exception:
+            return set()
         return {row["friend_id"] for row in rows}
 
     def ensure_profile(user_id):
         supabase = get_supabase()
-        existing = supabase.table("profiles").select("user_id").eq("user_id", user_id).limit(1).execute().data
-        if not existing:
-            supabase.table("profiles").insert({"user_id": user_id}).execute()
+        try:
+            existing = supabase.table("profiles").select("user_id").eq("user_id", user_id).limit(1).execute().data
+            if not existing:
+                supabase.table("profiles").insert({"user_id": user_id}).execute()
+        except Exception:
+            # Profile table may not exist if latest migration hasn't been applied.
+            return
 
 
     @app.route("/")
@@ -294,16 +338,26 @@ def create_app():
                 .data
             )
 
-            pending_invites = (
-                supabase.table("pending_invites")
-                .select("id,trip_id,invite_role")
-                .eq("email", email)
-                .eq("status", "pending")
-                .execute()
-                .data
-            )
+            try:
+                pending_invites = (
+                    supabase.table("pending_invites")
+                    .select("id,trip_id,invite_role")
+                    .eq("email", email)
+                    .eq("status", "pending")
+                    .execute()
+                    .data
+                )
+            except Exception:
+                pending_invites = (
+                    supabase.table("pending_invites")
+                    .select("id,trip_id")
+                    .eq("email", email)
+                    .eq("status", "pending")
+                    .execute()
+                    .data
+                )
             for invite in pending_invites:
-                supabase.table("notifications").insert(
+                insert_notification(
                     {
                         "user_id": new_user["id"],
                         "trip_id": invite["trip_id"],
@@ -312,7 +366,7 @@ def create_app():
                         "status": "pending",
                         "invite_role": invite.get("invite_role", "member"),
                     }
-                ).execute()
+                )
                 supabase.table("pending_invites").update({"status": "converted"}).eq("id", invite["id"]).execute()
 
             ensure_profile(new_user["id"])
@@ -454,15 +508,26 @@ def create_app():
 
         user_id = session["user_id"]
         supabase = get_supabase()
-        notification = _first(
-            supabase.table("notifications")
-            .select("id,trip_id,status,invite_role,type,friend_request_id,join_request_id")
-            .eq("id", notification_id)
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-            .data
-        )
+        try:
+            notification = _first(
+                supabase.table("notifications")
+                .select("id,trip_id,status,invite_role,type,friend_request_id,join_request_id")
+                .eq("id", notification_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+                .data
+            )
+        except Exception:
+            notification = _first(
+                supabase.table("notifications")
+                .select("id,trip_id,status,type")
+                .eq("id", notification_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+                .data
+            )
         if not notification or notification["status"] != "pending":
             flash("Notification is no longer actionable.", "warning")
             return redirect(url_for("dashboard"))
@@ -470,10 +535,7 @@ def create_app():
         ntype = notification.get("type")
         if ntype == "trip_invite":
             if action == "accept":
-                supabase.table("trip_members").upsert(
-                    {"trip_id": notification["trip_id"], "user_id": user_id, "role": notification.get("invite_role") or "member"},
-                    on_conflict="trip_id,user_id",
-                ).execute()
+                upsert_trip_member(notification["trip_id"], user_id, notification.get("invite_role") or "member")
         elif ntype == "friend_request":
             req_id = notification.get("friend_request_id")
             req = _first(supabase.table("friend_requests").select("requester_id,addressee_id,status").eq("id", req_id).limit(1).execute().data)
@@ -494,10 +556,7 @@ def create_app():
                     {"status": "approved" if action == "accept" else "rejected", "responded_at": datetime.utcnow().isoformat()}
                 ).eq("id", join_id).execute()
                 if action == "accept":
-                    supabase.table("trip_members").upsert(
-                        {"trip_id": jreq["trip_id"], "user_id": jreq["requester_id"], "role": "observer"},
-                        on_conflict="trip_id,user_id",
-                    ).execute()
+                    upsert_trip_member(jreq["trip_id"], jreq["requester_id"], "observer")
         
         supabase.table("notifications").update(
             {"status": "accepted" if action == "accept" else "denied", "responded_at": datetime.utcnow().isoformat()}
@@ -541,10 +600,7 @@ def create_app():
             flash("Could not create trip.", "danger")
             return redirect(url_for("dashboard"))
 
-        supabase.table("trip_members").upsert(
-            {"trip_id": trip["id"], "user_id": session["user_id"], "role": "owner"},
-            on_conflict="trip_id,user_id",
-        ).execute()
+        upsert_trip_member(trip["id"], session["user_id"], "owner")
 
         flash("Trip created.", "success")
         return redirect(url_for("trip_details", trip_id=trip["id"]))
@@ -645,7 +701,7 @@ def create_app():
 
         user = _first(supabase.table("users").select("id").eq("email", email).limit(1).execute().data)
         if user:
-            supabase.table("notifications").insert(
+            insert_notification(
                 {
                     "user_id": user["id"],
                     "trip_id": trip_id,
@@ -654,7 +710,7 @@ def create_app():
                     "status": "pending",
                     "invite_role": invite_role,
                 }
-            ).execute()
+            )
             flash("Invitation sent as in-app notification.", "success")
         else:
             try:
@@ -890,7 +946,7 @@ def create_app():
         )
 
         if req:
-            supabase.table("notifications").insert(
+            insert_notification(
                 {
                     "user_id": target["id"],
                     "type": "friend_request",
@@ -898,7 +954,7 @@ def create_app():
                     "status": "pending",
                     "friend_request_id": req["id"],
                 }
-            ).execute()
+            )
 
         flash("Friend request sent.", "success")
         return redirect(url_for("feed"))
@@ -912,10 +968,7 @@ def create_app():
             flash("Trip is not public.", "warning")
             return redirect(url_for("feed"))
 
-        supabase.table("trip_members").upsert(
-            {"trip_id": trip_id, "user_id": session["user_id"], "role": "observer"},
-            on_conflict="trip_id,user_id",
-        ).execute()
+        upsert_trip_member(trip_id, session["user_id"], "observer")
         flash("Joined trip as observer.", "success")
         return redirect(url_for("trip_details", trip_id=trip_id))
 
@@ -940,7 +993,7 @@ def create_app():
             .data
         )
         if req:
-            supabase.table("notifications").insert(
+            insert_notification(
                 {
                     "user_id": trip["created_by"],
                     "trip_id": trip_id,
@@ -949,7 +1002,7 @@ def create_app():
                     "status": "pending",
                     "join_request_id": req["id"],
                 }
-            ).execute()
+            )
 
         flash("Access request sent to owner.", "success")
         return redirect(url_for("feed"))
