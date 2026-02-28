@@ -494,6 +494,9 @@ def create_app():
 
         custom_field_columns = sorted(custom_field_keys)
         current_user_role = get_trip_role(trip_id, session["user_id"])
+        owner_candidates = [
+            m for m in members if m.get("user_id") != session["user_id"] and m.get("role") != "owner"
+        ]
 
         return render_template(
             "trip_details.html",
@@ -508,6 +511,7 @@ def create_app():
             can_open_links=current_user_role != "observer",
             assignable_roles=ASSIGNABLE_ROLES,
             current_user_id=session["user_id"],
+            owner_candidates=owner_candidates,
         )
 
     @app.route("/trips/<int:trip_id>/invite", methods=["POST"])
@@ -723,11 +727,27 @@ def create_app():
         if role is None:
             flash("You are not a participant of this trip.", "warning")
             return redirect(url_for("dashboard"))
-        if role == "owner":
-            flash("Owner cannot leave the trip. Assign ownership manually first.", "warning")
-            return redirect(url_for("trip_details", trip_id=trip_id))
 
-        get_supabase().table("trip_members").delete().eq("trip_id", trip_id).eq("user_id", session["user_id"]).execute()
+        supabase = get_supabase()
+        if role == "owner":
+            new_owner_user_id = request.form.get("new_owner_user_id", "").strip()
+            if not new_owner_user_id.isdigit():
+                flash("Select a participant to transfer ownership before leaving.", "warning")
+                return redirect(url_for("trip_details", trip_id=trip_id))
+
+            target_id = int(new_owner_user_id)
+            if target_id == session["user_id"]:
+                flash("Owner transfer target must be another participant.", "warning")
+                return redirect(url_for("trip_details", trip_id=trip_id))
+
+            target_role = get_trip_role(trip_id, target_id)
+            if target_role is None:
+                flash("Selected participant is not in this trip.", "danger")
+                return redirect(url_for("trip_details", trip_id=trip_id))
+
+            supabase.table("trip_members").update({"role": "owner"}).eq("trip_id", trip_id).eq("user_id", target_id).execute()
+
+        supabase.table("trip_members").delete().eq("trip_id", trip_id).eq("user_id", session["user_id"]).execute()
         flash("You left the trip.", "info")
         return redirect(url_for("dashboard"))
 

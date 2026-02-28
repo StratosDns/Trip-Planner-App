@@ -47,9 +47,23 @@
       {% endfor %}
     </ul>
 
-    <form method="post" action="{{ url_for('leave_trip', trip_id=trip['id']) }}">
-      <button type="submit" class="button secondary">Leave trip</button>
-    </form>
+    {% if current_user_role == 'owner' %}
+      <form method="post" action="{{ url_for('leave_trip', trip_id=trip['id']) }}" class="form-grid">
+        <label>Assign new owner before leaving
+          <select name="new_owner_user_id" required>
+            <option value="">Select participant</option>
+            {% for candidate in owner_candidates %}
+              <option value="{{ candidate['user_id'] }}">{{ candidate['name'] }} ({{ candidate['role'] }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" class="button secondary">Transfer ownership & leave</button>
+      </form>
+    {% else %}
+      <form method="post" action="{{ url_for('leave_trip', trip_id=trip['id']) }}">
+        <button type="submit" class="button secondary">Leave trip</button>
+      </form>
+    {% endif %}
   </article>
 
   <article class="card">
@@ -118,7 +132,7 @@
               <td>{{ (booking['notes'] or '-')|linkify_compact if can_open_links else (booking['notes'] or '-')|mask_links }}</td>
               <td>
                 {% if can_edit_bookings %}
-                  <button type="button" class="button" onclick="openEditModal('edit-modal-{{ booking['id'] }}')">Edit</button>
+                  <button type="button" class="button edit-pill" onclick="openEditModal('edit-modal-{{ booking['id'] }}')">Edit</button>
                 {% else %}
                   <span class="muted">Read-only</span>
                 {% endif %}

@@ -108,7 +108,9 @@ textarea { border-radius: 16px; }
 .muted { color: #64748b; }
 .table-wrap { width: 100%; overflow-x: auto; border-radius: 18px; }
 .booking-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; min-width: 920px; }
-.booking-table th, .booking-table td { border-bottom: 1px solid #e2e8f0; padding: 0.55rem; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.booking-table th, .booking-table td { border-bottom: 1px solid #e2e8f0; padding: 0.55rem; text-align: left; vertical-align: top; }
+.booking-table th { white-space: nowrap; word-break: normal; }
+.booking-table td { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .notification-row { display: flex; justify-content: space-between; align-items: center; margin: 0.5rem 0; gap: 1rem; }
 .actions-inline { display: flex; gap: 0.5rem; }
 pre { margin: 0; white-space: pre-wrap; font-family: inherit; overflow-wrap: anywhere; word-break: break-word; }
@@ -141,3 +143,5 @@ pre { margin: 0; white-space: pre-wrap; font-family: inherit; overflow-wrap: any
 .inline-role-form { display: inline-flex; gap: 0.4rem; margin-left: 0.6rem; align-items: center; }
 .inline-role-form select { width: auto; min-width: 110px; margin-top: 0; }
 .inline-role-form button { padding: 0.35rem 0.7rem; }
+
+.edit-pill { font-size: 0.85rem; white-space: nowrap; min-width: 58px; text-align: center; }
