@@ -224,17 +224,38 @@ def create_app():
     def inject_notification_count():
         user_id = session.get("user_id")
         if not user_id:
-            return {"pending_notification_count": 0}
+            return {"pending_notification_count": 0, "header_notifications": []}
+
         supabase = get_supabase()
-        rows = (
-            supabase.table("notifications")
-            .select("id")
-            .eq("user_id", user_id)
-            .eq("status", "pending")
-            .execute()
-            .data
-        )
-        return {"pending_notification_count": len(rows)}
+        try:
+            rows = (
+                supabase.table("notifications")
+                .select("id,trip_id,message,status,created_at,trips(title)")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(8)
+                .execute()
+                .data
+            )
+        except Exception:
+            rows = (
+                supabase.table("notifications")
+                .select("id,trip_id,message,status,created_at")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(8)
+                .execute()
+                .data
+            )
+
+        pending_count = 0
+        for row in rows:
+            if row.get("status") == "pending":
+                pending_count += 1
+            row["trip_title"] = relation_to_object(row.get("trips")).get("title", "Trip")
+
+        return {"pending_notification_count": pending_count, "header_notifications": rows}
+
 
     def get_trip_role(trip_id, user_id):
         supabase = get_supabase()
@@ -450,16 +471,15 @@ def create_app():
         normalized.sort(key=trip_priority)
         return render_template("feed.html", trips=normalized)
 
-    @app.route("/dashboard")
+    @app.route("/my-trips")
     @login_required
-    def dashboard():
+    def my_trips():
         user_id = session["user_id"]
         supabase = get_supabase()
         membership_rows = supabase.table("trip_members").select("trip_id").eq("user_id", user_id).execute().data
         trip_ids = [row["trip_id"] for row in membership_rows]
 
         trips = []
-        bookings = []
         if trip_ids:
             trips = (
                 supabase.table("trips")
@@ -469,42 +489,26 @@ def create_app():
                 .execute()
                 .data
             )
-            bookings = fetch_bookings_for_trip_ids(supabase, trip_ids)
 
         for trip in trips:
             trip["start_date_display"] = format_date_display(trip.get("start_date"))
             trip["end_date_display"] = format_date_display(trip.get("end_date"))
             trip["visibility"] = trip.get("visibility", "private")
+            trip["current_user_role"] = get_trip_role(trip["id"], user_id)
 
-        by_sector = defaultdict(list)
-        for booking in bookings:
-            trip_info = relation_to_object(booking.get("trips"))
-            booking["trip_title"] = trip_info.get("title", "Unknown trip")
-            booking["start_date_display"] = format_date_display(booking.get("start_date"))
-            booking["end_date_display"] = format_date_display(booking.get("end_date"))
-            booking["custom_fields_text"] = custom_fields_to_text(booking.get("custom_fields") or {})
-            by_sector[booking["sector"]].append(booking)
+        return render_template("my_trips.html", trips=trips)
 
-        notifications = (
-            supabase.table("notifications")
-            .select("id,trip_id,message,status,created_at,trips(title)")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .execute()
-            .data
-        )
-        for notification in notifications:
-            trip_info = relation_to_object(notification.get("trips"))
-            notification["trip_title"] = trip_info.get("title", "Trip")
-
-        return render_template("dashboard.html", trips=trips, by_sector=by_sector, sectors=SECTORS, notifications=notifications)
+    @app.route("/dashboard")
+    @login_required
+    def dashboard():
+        return redirect(url_for("my_trips"))
 
     @app.route("/notifications/<int:notification_id>/<action>", methods=["POST"])
     @login_required
     def respond_notification(notification_id, action):
         if action not in {"accept", "deny"}:
             flash("Invalid action.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(request.referrer or url_for("feed"))
 
         user_id = session["user_id"]
         supabase = get_supabase()
@@ -530,7 +534,7 @@ def create_app():
             )
         if not notification or notification["status"] != "pending":
             flash("Notification is no longer actionable.", "warning")
-            return redirect(url_for("dashboard"))
+            return redirect(request.referrer or url_for("feed"))
 
         ntype = notification.get("type")
         if ntype == "trip_invite":
@@ -563,7 +567,7 @@ def create_app():
         ).eq("id", notification_id).execute()
 
         flash("Request accepted." if action == "accept" else "Request denied.", "success")
-        return redirect(url_for("dashboard"))
+        return redirect(request.referrer or url_for("feed"))
 
     @app.route("/trips/new", methods=["POST"])
     @login_required
@@ -578,16 +582,16 @@ def create_app():
 
         if not title or not destination:
             flash("Trip title and destination are required.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
         if start_date_raw and not start_date:
             flash("Use dd/mm/yyyy format for trip start date.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
         if end_date_raw and not end_date:
             flash("Use dd/mm/yyyy format for trip end date.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
         if visibility not in TRIP_VISIBILITIES:
             flash("Invalid trip visibility.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
 
         supabase = get_supabase()
         trip = _first(
@@ -598,12 +602,29 @@ def create_app():
         )
         if not trip:
             flash("Could not create trip.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
 
         upsert_trip_member(trip["id"], session["user_id"], "owner")
 
         flash("Trip created.", "success")
         return redirect(url_for("trip_details", trip_id=trip["id"]))
+
+    @app.route("/trips/<int:trip_id>/visibility", methods=["POST"])
+    @login_required
+    def update_trip_visibility(trip_id):
+        new_visibility = request.form.get("visibility", "").strip().lower()
+        if new_visibility not in TRIP_VISIBILITIES:
+            flash("Invalid trip visibility.", "danger")
+            return redirect(request.referrer or url_for("my_trips"))
+
+        role = get_trip_role(trip_id, session["user_id"])
+        if role != "owner":
+            flash("Only trip owners can change visibility.", "danger")
+            return redirect(request.referrer or url_for("my_trips"))
+
+        get_supabase().table("trips").update({"visibility": new_visibility}).eq("id", trip_id).execute()
+        flash(f"Trip visibility changed to {new_visibility}.", "success")
+        return redirect(request.referrer or url_for("my_trips"))
 
     @app.route("/trips/<int:trip_id>")
     @login_required
@@ -611,7 +632,7 @@ def create_app():
         role = get_trip_role(trip_id, session["user_id"])
         if role is None:
             flash("You do not have access to this trip.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
 
         supabase = get_supabase()
         trip = _first(
@@ -624,7 +645,7 @@ def create_app():
         )
         if not trip:
             flash("Trip not found.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
         trip["start_date_display"] = format_date_display(trip.get("start_date"))
         trip["end_date_display"] = format_date_display(trip.get("end_date"))
         trip["visibility"] = trip.get("visibility", "private")
@@ -757,7 +778,7 @@ def create_app():
         role = get_trip_role(trip_id, session["user_id"])
         if role is None:
             flash("You do not have access to this trip.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
         if role == "observer":
             flash("Observers cannot modify bookings.", "warning")
             return redirect(url_for("trip_details", trip_id=trip_id))
@@ -806,7 +827,7 @@ def create_app():
         role = get_trip_role(trip_id, session["user_id"])
         if role is None:
             flash("You do not have access to this trip.", "danger")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
 
         sector = request.form.get("sector", "").strip().lower()
         title = request.form.get("title", "").strip()
@@ -891,7 +912,7 @@ def create_app():
         role = get_trip_role(trip_id, session["user_id"])
         if role is None:
             flash("You are not a participant of this trip.", "warning")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("my_trips"))
 
         supabase = get_supabase()
         if role == "owner":
@@ -914,7 +935,7 @@ def create_app():
 
         supabase.table("trip_members").delete().eq("trip_id", trip_id).eq("user_id", session["user_id"]).execute()
         flash("You left the trip.", "info")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("my_trips"))
 
 
     @app.route("/friends/request", methods=["POST"])
